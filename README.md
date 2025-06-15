@@ -74,9 +74,11 @@ vercel
 2. Import your repository on [Vercel](https://vercel.com/new)
 3. Configure your project:
    - Framework Preset: Nuxt.js
-   - Build Command: (leave as default)
-   - Output Directory: (leave as default)
+   - Build Command: `pnpm run build` (default)
+   - Output Directory: `.output/public`
 4. Click "Deploy"
+
+Vercel will automatically detect your Nuxt 3 project and deploy it correctly.
 
 ## Technology Stack
 
