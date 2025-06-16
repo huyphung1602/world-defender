@@ -281,23 +281,22 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
       if (enemy.word.toLowerCase().startsWith(typedText.toLowerCase())) {
-        // Calculate damage and critical hit
-        const baseDamage = player.damage;
-        const isCritical = Math.random() < player.critChance;
-        const damage = isCritical ? baseDamage * 2 : baseDamage;
+        // Check if triple shot triggers based on chance
+        const tripleShot = Math.random() < player.multiShotChance;
+        const shotsToFire = tripleShot ? 2 + player.multiShotTargets : 1; // 2 base shots + extra from levels if triggered
+        
+        // Fire shot(s)
+        for (let shotIndex = 0; shotIndex < shotsToFire; shotIndex++) {
+          // Each shot has independent chance calculations
+          const baseDamage = player.damage;
+          const isCritical = Math.random() < player.critChance;
+          const damage = isCritical ? baseDamage * player.critMultiplier : baseDamage;
 
-        // Fire projectile
-        fireProjectile(enemy, damage, isCritical);
-
-        // Multi-shot chance
-        if (Math.random() < player.multiShotChance) {
+          // Add slight delay between shots for visual effect (only if multiple shots)
+          const delay = tripleShot ? shotIndex * 50 : 0;
           setTimeout(() => {
-            const remainingEnemies = gameState.value.enemies.filter(e => e.id !== enemy.id);
-            if (remainingEnemies.length > 0) {
-              const randomEnemy = remainingEnemies[Math.floor(Math.random() * remainingEnemies.length)];
-              fireProjectile(randomEnemy, damage, isCritical, true);
-            }
-          }, 100);
+            fireProjectile(enemy, damage, isCritical, shotIndex > 0); // Mark additional shots as multi-shot for visual distinction
+          }, delay);
         }
 
         break;
@@ -402,6 +401,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       applyFrozenEffect(enemy);
     }
 
+    // Each shot has independent chance to trigger explosive effect
     if (Math.random() < gameState.value.player.explosiveChance) {
       createExplosion(enemy.x, enemy.y, '#ff9500', 80, damage * 0.8);
     }

@@ -218,7 +218,7 @@ export const createPlayer = (x: number, y: number): Player => {
     xpToNextLevel: 100,
     autoFireInterval: null,
     multiShotTargets: 0,
-    multiShotChance: 0,
+    multiShotChance: 0, // Start with 0% chance, only gets chance when skill is learned
     bounceCount: 0,  // Start with no bounces
     frozenBulletCooldown: null,  // Start with no frozen bullets
     nextFrozenBulletTime: null,
@@ -271,15 +271,21 @@ export const generateSkills = (): Skill[] => {
       }
     },
     {
-      id: 'multi_shoot',
-      name: 'Multi-Shoot',
-      description: 'Chance to hit multiple enemies with one shot. Each level increases chance by 5%.',
+      id: 'triple_shot',
+      name: 'Triple Shot',
+      description: 'Fires 3 shots at the same target. Each shot can trigger other skill effects.',
       icon: '🔱',
       level: 0,
       maxLevel: 5,
       applyEffect: (player: Player) => {
-        player.multiShotTargets += 1;
-        player.multiShotChance += 0.05; // +5% per level, up to 25%
+        player.multiShotTargets += 1; // Keep for compatibility, represents number of extra shots
+        if (player.multiShotChance === 0) {
+          // First level gives 10% base chance
+          player.multiShotChance = 0.1;
+        } else {
+          // Additional levels give +5% each
+          player.multiShotChance += 0.05;
+        }
       }
     },
     {
@@ -339,7 +345,7 @@ export const generateSkills = (): Skill[] => {
       id: 'smart_auto',
       name: 'Smart Auto-Fire',
       description: 'Auto-fires at an enemy every 10 seconds. Each level reduces cooldown by 1.5 seconds (min 3s).',
-      icon: '🎯',
+      icon: '🤖',
       level: 0,
       maxLevel: 5,
       applyEffect: (player: Player) => {

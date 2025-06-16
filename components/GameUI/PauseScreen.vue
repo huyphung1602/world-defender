@@ -93,8 +93,13 @@ const getSkillDescription = (skill: Skill) => {
       return `Increases damage by ${5 * skill.level}`;
     case 'crit':
       return `Increases critical chance by ${5 * skill.level}%`;
-    case 'multi_shoot':
-      return `${skill.level} extra targets with ${skill.level * 5}% chance`;
+    case 'triple_shot':
+      if (skill.level === 0) {
+        return `Unlocks triple shot ability`;
+      } else {
+        const chance = skill.level === 1 ? 10 : 10 + ((skill.level - 1) * 5);
+        return `${chance}% chance to fire ${2 + skill.level} shots`;
+      }
     case 'shield':
       return `Increases max shield by ${25 * skill.level}`;
     case 'regen':
