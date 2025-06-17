@@ -1,5 +1,5 @@
 <template>
-  <div class="game-container" @click="focusInput">
+  <div class="game-container">
     <!-- Game Canvas -->
     <canvas
       ref="gameCanvas"
@@ -18,14 +18,12 @@
         @togglePause="togglePause"
       />
 
-      <!-- Typing Input - Centered above player -->
-      <TypingInput
-        ref="typingInputRef"
-        :disabled="isPaused || gameState.isPausedForLevelUp"
-        :autoFocus="true"
-        @textSubmitted="handleTyping"
-        @focusRequested="focusInput"
-      />
+      <!-- Wrong Typing Visual Feedback -->
+      <div
+        v-if="wrongTypingEffect > 0"
+        class="wrong-typing-overlay"
+        :style="{ opacity: wrongTypingEffect }"
+      ></div>
 
       <!-- Pause Screen -->
       <PauseScreen
@@ -67,7 +65,6 @@ import StartScreen from './GameUI/StartScreen.vue';
 import PauseScreen from './GameUI/PauseScreen.vue';
 import LevelUpScreen from './GameUI/LevelUpScreen.vue';
 import GameHUD from './GameUI/GameHUD.vue';
-import TypingInput from './GameUI/TypingInput.vue';
 
 // Canvas dimensions
 const canvasWidth = ref(1600);
@@ -75,7 +72,6 @@ const canvasHeight = ref(900);
 
 // Refs
 const gameCanvas = ref<HTMLCanvasElement | null>(null);
-const typingInputRef = ref<InstanceType<typeof TypingInput> | null>(null);
 
 // Initialize game engine and renderer
 const gameEngine = useGameEngine(canvasWidth.value, canvasHeight.value);
@@ -86,11 +82,14 @@ const {
   gameState,
   isPaused,
   availableSkillChoices,
+  currentTypedText,
+  wrongTypingEffect,
   startGame: engineStartGame,
   restartGame: engineRestartGame,
   togglePause: engineTogglePause,
   updateGame,
-  handleTyping,
+  handleKeyPress,
+  resetTyping,
   handleLevelUpConfirmation
 } = gameEngine;
 
@@ -102,10 +101,20 @@ const activeSkills = computed(() => {
 // Animation frame reference
 const animationFrameId = ref<number>(0);
 
-// Focus the typing input
-const focusInput = () => {
-  if (gameState.value.isPlaying && !gameState.value.isGameOver && !isPaused.value && !gameState.value.isPausedForLevelUp && typingInputRef.value) {
-    typingInputRef.value.focus();
+// Handle keyboard events
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (gameState.value.isPlaying && !gameState.value.isGameOver && !isPaused.value && !gameState.value.isPausedForLevelUp) {
+    // Handle typing keys
+    handleKeyPress(event.key);
+  }
+
+  if (event.key === 'Escape' && gameState.value.isPlaying && !gameState.value.isGameOver) {
+    togglePause();
+  }
+
+  // Handle Enter key to start/play game
+  if (event.key === 'Enter' && (!gameState.value.isPlaying || gameState.value.isGameOver)) {
+    startGame();
   }
 };
 
@@ -121,9 +130,6 @@ const startGame = () => {
 
   // Start game engine
   engineStartGame();
-
-  // Focus the typing input
-  setTimeout(focusInput, 100);
 
   // Start the game loop
   gameLoop();
@@ -167,27 +173,9 @@ const gameLoop = (currentTime: number = performance.now()) => {
   }
 };
 
-// Handle keyboard events
-const handleKeyDown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && gameState.value.isPlaying && !gameState.value.isGameOver) {
-    togglePause();
-  }
-  
-  // Handle Enter key to start/play game
-  if (event.key === 'Enter' && (!gameState.value.isPlaying || gameState.value.isGameOver)) {
-    startGame();
-  }
-};
-
 // Toggle pause
 const togglePause = () => {
-  const wasPaused = isPaused.value;
   engineTogglePause();
-
-  // If we're unpausing, focus the input
-  if (wasPaused && !isPaused.value) {
-    setTimeout(focusInput, 100);
-  }
 };
 
 // Restart the game
@@ -202,9 +190,6 @@ const restartGame = () => {
 
   // Restart game engine
   engineRestartGame();
-
-  // Focus the typing input
-  setTimeout(focusInput, 100);
 
   // Start the game loop
   gameLoop();
@@ -259,5 +244,29 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+.wrong-typing-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, rgba(255, 0, 0, 0.3) 0%, rgba(255, 0, 0, 0.1) 50%, rgba(255, 0, 0, 0.05) 100%);
+  pointer-events: none;
+  z-index: 10;
+  animation: wrongTypingPulse 0.3s ease-out;
+}
+
+@keyframes wrongTypingPulse {
+  0% {
+    transform: scale(1.05);
+  }
+  50% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1.02);
+  }
 }
 </style>

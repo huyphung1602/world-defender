@@ -211,14 +211,64 @@ export const drawPlayer = (ctx: CanvasRenderingContext2D, player: any): void => 
   ctx.fill();
   ctx.closePath();
 
+  // Draw shield indicator ring around Earth
+  const shieldPercentage = player.shield / player.maxShield;
+  const shieldRadius = player.radius + 8;
+
+  // Shield background (darker ring)
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, shieldRadius, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(100, 150, 255, 0.3)';
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.closePath();
+
+  // Shield foreground (bright ring showing current shield)
+  if (shieldPercentage > 0) {
+    const startAngle = -Math.PI / 2; // Start from top
+    const endAngle = startAngle + (Math.PI * 2 * shieldPercentage);
+
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, shieldRadius, startAngle, endAngle);
+
+    // Color based on shield level
+    let shieldColor;
+    if (shieldPercentage > 0.6) {
+      shieldColor = '#00ff00'; // Green for high shield
+    } else if (shieldPercentage > 0.3) {
+      shieldColor = '#ffff00'; // Yellow for medium shield
+    } else {
+      shieldColor = '#ff0000'; // Red for low shield
+    }
+
+    ctx.strokeStyle = shieldColor;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    ctx.closePath();
+
+    // Add glow effect to shield
+    ctx.shadowColor = shieldColor;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, shieldRadius, startAngle, endAngle);
+    ctx.strokeStyle = shieldColor;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.closePath();
+
+    // Reset shadow
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+  }
+
   // Display player level above
   ctx.font = 'bold 14px Arial';
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
   ctx.lineWidth = 3;
-  ctx.strokeText(`Lvl ${player.level}`, player.x, player.y - player.radius - 10);
-  ctx.fillText(`Lvl ${player.level}`, player.x, player.y - player.radius - 10);
+  ctx.strokeText(`Lvl ${player.level}`, player.x, player.y - player.radius - 45);
+  ctx.fillText(`Lvl ${player.level}`, player.x, player.y - player.radius - 45);
 };
 
 /**
@@ -298,20 +348,71 @@ export const drawEnemy = (ctx: CanvasRenderingContext2D, enemy: any): void => {
     drawSpaceCraft(ctx, enemy);
   }
 
-  // Draw enemy word - positioned closer to the enemy
-  ctx.font = 'bold 16px Arial';
+  // Draw enemy word - positioned based on spawn side for better visibility
+  ctx.font = 'bold 24px Arial'; // Increased from 16px to 24px for better visibility
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // Position text closer to enemy (reduced from -45 to -15)
-  const textY = enemy.y - enemy.radius - 15;
+  // Position text based on spawn side for better visibility
+  let textY;
+  if (enemy.spawnSide === 'top') {
+    // Show text below enemy when spawning from top for better visibility
+    textY = enemy.y + enemy.radius + 25;
+  } else {
+    // Show text above enemy for other spawn sides
+    textY = enemy.y - enemy.radius - 20;
+  }
 
   // Simplified text stroke for better performance
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-  ctx.lineWidth = 2; // Reduced from 3
+  ctx.lineWidth = 3; // Increased stroke for larger text
   ctx.strokeText(enemy.word, enemy.x, textY);
-  ctx.fillText(enemy.word, enemy.x, textY);
+
+  // Draw enemy word with highlighting if it's the highlighted enemy
+  if (enemy.isHighlighted && enemy.typedProgress > 0) {
+    // Draw typed portion - use red if wrong typing flash is active, otherwise green
+    const typedPortion = enemy.word.substring(0, enemy.typedProgress);
+    const remainingPortion = enemy.word.substring(enemy.typedProgress);
+
+    // Measure text to position the parts correctly
+    const typedWidth = ctx.measureText(typedPortion).width;
+    const totalWidth = ctx.measureText(enemy.word).width;
+
+    // Determine typed portion color based on flash effect
+    const typedColor = enemy.wrongTypingFlash > 0 ?
+      `rgba(255, 0, 0, ${0.8 + enemy.wrongTypingFlash * 0.2})` : // Red with intensity
+      '#00ff00'; // Green
+
+    // Draw typed portion with appropriate color
+    ctx.fillStyle = typedColor;
+    ctx.fillText(typedPortion, enemy.x - totalWidth / 2 + typedWidth / 2, textY);
+
+    // Draw remaining portion (white)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(remainingPortion, enemy.x - totalWidth / 2 + typedWidth + ctx.measureText(remainingPortion).width / 2, textY);
+
+    // Add extra glow for highlighted enemy (adjust color based on flash)
+    if (enemy.wrongTypingFlash > 0) {
+      ctx.shadowColor = '#ff0000';
+      ctx.shadowBlur = 15 * enemy.wrongTypingFlash;
+      ctx.fillStyle = typedColor;
+      ctx.fillText(typedPortion, enemy.x - totalWidth / 2 + typedWidth / 2, textY);
+    } else {
+      ctx.shadowColor = '#00ff00';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#00ff00';
+      ctx.fillText(typedPortion, enemy.x - totalWidth / 2 + typedWidth / 2, textY);
+    }
+
+    // Reset shadow
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+  } else {
+    // Draw normal text
+    ctx.fillStyle = enemy.isHighlighted ? '#ffff00' : '#ffffff'; // Highlighted enemies get yellow text
+    ctx.fillText(enemy.word, enemy.x, textY);
+  }
 
   // Draw HP bar positioned right below the text with proper spacing
   drawEnemyHPBar(ctx, enemy, textY);

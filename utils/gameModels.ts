@@ -23,6 +23,11 @@ export interface Enemy {
   isFrozen: boolean;
   frozenUntil: number | null;
   originalSpeed: number;
+  // Typing highlight properties
+  isHighlighted: boolean;
+  typedProgress: number; // Number of characters typed correctly
+  wrongTypingFlash: number; // Flash effect when wrong typing occurs (0-1)
+  spawnSide: 'top' | 'right' | 'bottom' | 'left'; // Which side the enemy spawned from
 }
 
 export interface Player {
@@ -106,7 +111,8 @@ export const createEnemy = (
   canvasHeight: number,
   wave: number,
   isElite: boolean = false,
-  isBoss: boolean = false
+  isBoss: boolean = false,
+  spawnSide: 'top' | 'right' | 'bottom' | 'left' = 'top'
 ): Enemy => {
   // Always target the exact center of the canvas
   const centerX = canvasWidth / 2;
@@ -186,6 +192,10 @@ export const createEnemy = (
     isFrozen: false,
     frozenUntil: null,
     originalSpeed: speed,
+    isHighlighted: false,
+    typedProgress: 0,
+    wrongTypingFlash: 0,
+    spawnSide,
   };
 };
 

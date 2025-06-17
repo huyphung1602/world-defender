@@ -65,24 +65,29 @@ const spawnEnemy = (
   const margin = 50;
   const side = Math.floor(Math.random() * 4);
   let x, y;
+  let spawnSide: 'top' | 'right' | 'bottom' | 'left';
 
   switch (side) {
     case 0: // Top
       x = Math.random() * canvasWidth;
       y = -margin;
+      spawnSide = 'top';
       break;
     case 1: // Right
       x = canvasWidth + margin;
       y = Math.random() * canvasHeight;
+      spawnSide = 'right';
       break;
     case 2: // Bottom
       x = Math.random() * canvasWidth;
       y = canvasHeight + margin;
+      spawnSide = 'bottom';
       break;
     case 3: // Left
     default:
       x = -margin;
       y = Math.random() * canvasHeight;
+      spawnSide = 'left';
       break;
   }
 
@@ -102,7 +107,8 @@ const spawnEnemy = (
     canvasHeight,
     wave,
     isElite,
-    isBoss
+    isBoss,
+    spawnSide
   );
 
   gameState.enemies.push(enemy);

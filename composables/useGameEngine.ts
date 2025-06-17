@@ -57,6 +57,11 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   const targetFrameTime = 1000 / targetFPS; // 16.67ms per frame
   const lastRenderTime = ref<number>(0);
 
+  // Typing state
+  const currentTypedText = ref('');
+  const highlightedEnemyId = ref<number | null>(null);
+  const wrongTypingEffect = ref(0); // For visual feedback on wrong typing
+
   // Initialize stars
   onMounted(() => {
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
@@ -79,10 +84,17 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     damageNumbers.value = [];
     isPaused.value = false;
 
+    // Reset typing state
+    resetTyping();
+
+    // Reset timers
+    clearInterval(spawnTimerId.value);
+    clearInterval(autoFireTimerId.value);
+
     // Initialize stars
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
 
-    // Start the first wave
+    // Start first wave
     startWave(1);
 
     // Start game loop
@@ -105,6 +117,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     explosions.value = [];
     damageNumbers.value = [];
     isPaused.value = false;
+
+    // Reset typing state
+    resetTyping();
 
     // Initialize stars
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
@@ -191,6 +206,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
         if (distanceFromCenter > maxDistance) {
           enemies.splice(i, 1);
+          // Revalidate typing when enemy is removed
+          revalidateTyping();
           continue; // Skip further processing for this enemy
         }
       }
@@ -225,6 +242,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
         gameState.value.waveEnemiesDefeated++;
         enemies.splice(i, 1);
+        // Revalidate typing when enemy is removed
+        revalidateTyping();
 
         if (player.shield <= 0) {
           gameState.value.isGameOver = true;
@@ -269,39 +288,153 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
         player.shield + player.shieldRegenRate * deltaTime.value
       );
     }
-  };
 
-  // Handle typing input
-  const handleTyping = (typedText: string) => {
-    if (!typedText.trim() || isPaused.value || gameState.value.isPausedForLevelUp) return;
+    // Update wrong typing effect (fade out)
+    if (wrongTypingEffect.value > 0) {
+      wrongTypingEffect.value = Math.max(0, wrongTypingEffect.value - deltaTime.value * 3);
+    }
 
-    const { enemies, player } = gameState.value;
-
-    // Find matching enemy
-    for (let i = 0; i < enemies.length; i++) {
-      const enemy = enemies[i];
-      if (enemy.word.toLowerCase().startsWith(typedText.toLowerCase())) {
-        // Check if triple shot triggers based on chance
-        const tripleShot = Math.random() < player.multiShotChance;
-        const shotsToFire = tripleShot ? 2 + player.multiShotTargets : 1; // 2 base shots + extra from levels if triggered
-        
-        // Fire shot(s)
-        for (let shotIndex = 0; shotIndex < shotsToFire; shotIndex++) {
-          // Each shot has independent chance calculations
-          const baseDamage = player.damage;
-          const isCritical = Math.random() < player.critChance;
-          const damage = isCritical ? baseDamage * player.critMultiplier : baseDamage;
-
-          // Add slight delay between shots for visual effect (only if multiple shots)
-          const delay = tripleShot ? shotIndex * 50 : 0;
-          setTimeout(() => {
-            fireProjectile(enemy, damage, isCritical, shotIndex > 0); // Mark additional shots as multi-shot for visual distinction
-          }, delay);
-        }
-
-        break;
+    // Update enemy wrong typing flash effects
+    for (const enemy of enemies) {
+      if (enemy.wrongTypingFlash > 0) {
+        enemy.wrongTypingFlash = Math.max(0, enemy.wrongTypingFlash - deltaTime.value * 5); // Faster fade (0.2s)
       }
     }
+  };
+
+  // Handle typing input - NEW REAL-TIME SYSTEM
+  const handleKeyPress = (key: string) => {
+    if (isPaused.value || gameState.value.isPausedForLevelUp || gameState.value.isGameOver) return;
+
+    if (key === 'Enter') {
+      // Reset typing
+      resetTyping();
+      return;
+    }
+
+    if (key === 'Backspace') {
+      // Remove last character
+      if (currentTypedText.value.length > 0) {
+        currentTypedText.value = currentTypedText.value.slice(0, -1);
+      }
+    } else if (key.length === 1 && /^[a-zA-Z]$/.test(key)) {
+      // Add character (only letters)
+      currentTypedText.value += key.toLowerCase();
+    }
+
+    // Update enemy highlighting and check for complete matches
+    updateEnemyHighlighting();
+  };
+
+  // Reset typing state
+  const resetTyping = () => {
+    currentTypedText.value = '';
+    highlightedEnemyId.value = null;
+    // Clear all enemy highlighting
+    gameState.value.enemies.forEach(enemy => {
+      enemy.isHighlighted = false;
+      enemy.typedProgress = 0;
+    });
+  };
+
+  // Update enemy highlighting based on current typed text
+  const updateEnemyHighlighting = () => {
+    const typedText = currentTypedText.value;
+    const { enemies, player } = gameState.value;
+
+    // Clear previous highlighting
+    enemies.forEach(enemy => {
+      enemy.isHighlighted = false;
+      enemy.typedProgress = 0;
+    });
+    highlightedEnemyId.value = null;
+
+    if (!typedText) return;
+
+    // Find the best matching enemy
+    let bestMatch: Enemy | null = null;
+    let bestMatchLength = 0;
+    let hasAnyMatch = false;
+
+    for (const enemy of enemies) {
+      const enemyWord = enemy.word.toLowerCase();
+      if (enemyWord.startsWith(typedText)) {
+        hasAnyMatch = true;
+        if (typedText.length > bestMatchLength) {
+          bestMatch = enemy;
+          bestMatchLength = typedText.length;
+        }
+      }
+    }
+
+    // If no enemies match the typed text, auto-clear it
+    if (!hasAnyMatch) {
+      // Trigger flash effect on currently highlighted enemy if it exists
+      const currentlyHighlighted = enemies.find(enemy => enemy.isHighlighted);
+      if (currentlyHighlighted && currentlyHighlighted.typedProgress > 0) {
+        currentlyHighlighted.wrongTypingFlash = 1.0;
+      }
+
+      // Reduce player shield for invalid typing (when enemies change/disappear)
+      player.shield = Math.max(0, player.shield - 10);
+
+      // Create damage number on player
+      createDamageNumber(player.x, player.y - 30, 10, '#ff4444', false, 'INVALID TEXT!');
+
+      currentTypedText.value = '';
+      wrongTypingEffect.value = 1;
+      // Clear all highlighting since we're resetting
+      enemies.forEach(enemy => {
+        enemy.isHighlighted = false;
+        enemy.typedProgress = 0;
+      });
+      highlightedEnemyId.value = null;
+    } else {
+      // Highlight the best matching enemy
+      if (bestMatch) {
+        bestMatch.isHighlighted = true;
+        bestMatch.typedProgress = typedText.length;
+        highlightedEnemyId.value = bestMatch.id;
+
+        // Check if we have a complete match
+        if (typedText === bestMatch.word.toLowerCase()) {
+          // Fire at the enemy
+          fireAtEnemy(bestMatch);
+          // Reset typing
+          resetTyping();
+        }
+      }
+    }
+  };
+
+  // Fire at a specific enemy
+  const fireAtEnemy = (enemy: Enemy) => {
+    const { player } = gameState.value;
+
+    // Check if triple shot triggers based on chance
+    const tripleShot = Math.random() < player.multiShotChance;
+    const shotsToFire = tripleShot ? 2 + player.multiShotTargets : 1;
+
+    // Fire shot(s)
+    for (let shotIndex = 0; shotIndex < shotsToFire; shotIndex++) {
+      // Each shot has independent chance calculations
+      const baseDamage = player.damage;
+      const isCritical = Math.random() < player.critChance;
+      const damage = isCritical ? baseDamage * player.critMultiplier : baseDamage;
+
+      // Add slight delay between shots for visual effect (only if multiple shots)
+      const delay = tripleShot ? shotIndex * 50 : 0;
+      setTimeout(() => {
+        fireProjectile(enemy, damage, isCritical, shotIndex > 0);
+      }, delay);
+    }
+  };
+
+  // Legacy handleTyping function (keep for compatibility but redirect to new system)
+  const handleTyping = (typedText: string) => {
+    // This is now only used for manual text submission (if needed)
+    // The new system handles real-time typing through handleKeyPress
+    console.warn('Legacy handleTyping called, use handleKeyPress instead');
   };
 
   // Fire projectile
@@ -409,6 +542,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
   // Apply damage to enemy
   const applyDamageToEnemy = (enemy: Enemy, damage: number, isCritical: boolean) => {
+    const enemyCountBefore = gameState.value.enemies.length;
+    const enemyWordBefore = enemy.word;
+
     applyDamageToEnemyMechanic(
       enemy,
       damage,
@@ -421,6 +557,14 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       },
       availableSkillChoices
     );
+
+    // Revalidate typing if enemy was removed or its word changed
+    const enemyCountAfter = gameState.value.enemies.length;
+    const enemyWordAfter = enemy.health > 0 ? enemy.word : null;
+
+    if (enemyCountAfter !== enemyCountBefore || (enemyWordAfter && enemyWordAfter !== enemyWordBefore)) {
+      revalidateTyping();
+    }
   };
 
   // Apply frozen effect to enemy
@@ -461,6 +605,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   // Start a new wave
   const startWave = (waveNumber: number) => {
     gameState.value.wave = waveNumber;
+
+    // Reset typing state for new wave
+    resetTyping();
 
     startWaveMechanic(
       gameState.value,
@@ -532,9 +679,53 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     availableSkillChoices.value = [];
   };
 
+  // Revalidate current typing against remaining enemies
+  const revalidateTyping = () => {
+    if (!currentTypedText.value) return;
+
+    const typedText = currentTypedText.value;
+    const { enemies, player } = gameState.value;
+
+    // Check if any remaining enemy matches the current typed text
+    let hasMatchingEnemy = false;
+    for (const enemy of enemies) {
+      const enemyWord = enemy.word.toLowerCase();
+      if (enemyWord.startsWith(typedText)) {
+        hasMatchingEnemy = true;
+        break;
+      }
+    }
+
+    // If no enemy matches the current typed text, clear it and show feedback
+    if (!hasMatchingEnemy) {
+      // Trigger flash effect on currently highlighted enemy if it exists
+      const currentlyHighlighted = enemies.find(enemy => enemy.isHighlighted);
+      if (currentlyHighlighted && currentlyHighlighted.typedProgress > 0) {
+        currentlyHighlighted.wrongTypingFlash = 1.0;
+      }
+
+      // Reduce player shield for invalid typing (when enemies change/disappear)
+      player.shield = Math.max(0, player.shield - 10);
+
+      // Create damage number on player
+      createDamageNumber(player.x, player.y - 30, 10, '#ff4444', false, 'INVALID TEXT!');
+
+      currentTypedText.value = '';
+      wrongTypingEffect.value = 1;
+      // Clear all highlighting since we're resetting
+      enemies.forEach(enemy => {
+        enemy.isHighlighted = false;
+        enemy.typedProgress = 0;
+      });
+      highlightedEnemyId.value = null;
+    } else {
+      // Update highlighting for the remaining enemies
+      updateEnemyHighlighting();
+    }
+  };
+
   return {
     gameState,
-    isPaused,
     projectiles,
     explosions,
     damageNumbers,
@@ -542,13 +733,22 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     backgroundGradient,
     autoFireTarget,
     autoFireLaserOpacity,
-    availableSkillChoices,
     deltaTime,
+    isPaused,
+    availableSkillChoices,
+    // Typing state
+    currentTypedText,
+    highlightedEnemyId,
+    wrongTypingEffect,
+    // Functions
     startGame,
     restartGame,
     togglePause,
     updateGame,
-    handleTyping,
+    handleKeyPress,
+    resetTyping,
+    handleTyping, // Keep for backward compatibility
     handleLevelUpConfirmation,
+    revalidateTyping,
   };
 }
