@@ -38,6 +38,7 @@ export interface Player {
   innerColor: string;
   glowColor: string;
   glowSize: number;
+  rotation: number; // Rotation angle in radians for Earth rotation animation
   damage: number;
   critChance: number;
   critMultiplier: number;
@@ -212,6 +213,7 @@ export const createPlayer = (x: number, y: number): Player => {
     innerColor,
     glowColor,
     glowSize: 35,
+    rotation: 0,
     damage: 10,
     critChance: 0.05,
     critMultiplier: 1.5,

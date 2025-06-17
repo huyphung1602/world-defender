@@ -95,6 +95,14 @@ export const drawPlayer = (ctx: CanvasRenderingContext2D, player: any): void => 
   ctx.fill();
   ctx.closePath();
 
+  // Save the current context state before rotation
+  ctx.save();
+
+  // Apply rotation to the Earth (translate to center, rotate, then translate back)
+  ctx.translate(player.x, player.y);
+  ctx.rotate(player.rotation);
+  ctx.translate(-player.x, -player.y);
+
   // Draw Earth-like appearance
   // Base blue ocean color
   ctx.beginPath();
@@ -211,7 +219,10 @@ export const drawPlayer = (ctx: CanvasRenderingContext2D, player: any): void => 
   ctx.fill();
   ctx.closePath();
 
-  // Draw shield indicator ring around Earth
+  // Restore the context state (removes rotation for UI elements)
+  ctx.restore();
+
+  // Draw shield indicator ring around Earth (not rotated)
   const shieldPercentage = player.shield / player.maxShield;
   const shieldRadius = player.radius + 8;
 
@@ -261,7 +272,7 @@ export const drawPlayer = (ctx: CanvasRenderingContext2D, player: any): void => 
     ctx.shadowColor = 'transparent';
   }
 
-  // Display player level above
+  // Display player level above (not rotated)
   ctx.font = 'bold 14px Arial';
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';

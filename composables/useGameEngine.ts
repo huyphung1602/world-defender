@@ -289,6 +289,12 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       );
     }
 
+    // Update player rotation for Earth spinning animation
+    player.rotation += deltaTime.value * 0.5; // Slow rotation: 0.5 radians per second
+    if (player.rotation > Math.PI * 2) {
+      player.rotation -= Math.PI * 2; // Keep angle within 0-2π range
+    }
+
     // Update wrong typing effect (fade out)
     if (wrongTypingEffect.value > 0) {
       wrongTypingEffect.value = Math.max(0, wrongTypingEffect.value - deltaTime.value * 3);
