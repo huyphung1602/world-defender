@@ -386,18 +386,26 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
     if (!typedText) return;
 
-    // Find the best matching enemy
-    let bestMatch: Enemy | null = null;
-    let bestMatchLength = 0;
+    // Find ALL matching enemies and determine the primary target
+    let primaryTarget: Enemy | null = null;
+    let primaryTargetDistance = Infinity;
     let hasAnyMatch = false;
+    const matchingEnemies: Enemy[] = [];
 
     for (const enemy of enemies) {
       const enemyWord = enemy.word.toLowerCase();
       if (enemyWord.startsWith(typedText)) {
         hasAnyMatch = true;
-        if (typedText.length > bestMatchLength) {
-          bestMatch = enemy;
-          bestMatchLength = typedText.length;
+        matchingEnemies.push(enemy);
+
+        // Calculate distance from player to determine primary target (closest enemy)
+        const dx = enemy.x - gameState.value.player.x;
+        const dy = enemy.y - gameState.value.player.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < primaryTargetDistance) {
+          primaryTarget = enemy;
+          primaryTargetDistance = distance;
         }
       }
     }
@@ -406,16 +414,20 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     if (!hasAnyMatch) {
       handleWrongTyping('manual');
     } else {
-      // Highlight the best matching enemy
-      if (bestMatch) {
-        bestMatch.isHighlighted = true;
-        bestMatch.typedProgress = typedText.length;
-        highlightedEnemyId.value = bestMatch.id;
+      // Highlight ALL matching enemies
+      for (const enemy of matchingEnemies) {
+        enemy.isHighlighted = true;
+        enemy.typedProgress = typedText.length;
+      }
 
-        // Check if we have a complete match
-        if (typedText === bestMatch.word.toLowerCase()) {
-          // Fire at the enemy
-          fireAtEnemy(bestMatch);
+      // Set the primary target (closest enemy) as the highlighted enemy ID
+      if (primaryTarget) {
+        highlightedEnemyId.value = primaryTarget.id;
+
+        // Check if we have a complete match with the primary target
+        if (typedText === primaryTarget.word.toLowerCase()) {
+          // Fire at the primary target
+          fireAtEnemy(primaryTarget);
           // Reset typing
           resetTyping();
         }
