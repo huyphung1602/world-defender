@@ -322,14 +322,21 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       // Remove last character
       if (currentTypedText.value.length > 0) {
         currentTypedText.value = currentTypedText.value.slice(0, -1);
+        // Update highlighting after backspace
+        updateEnemyHighlighting();
       }
-    } else if (key.length === 1 && /^[a-zA-Z]$/.test(key)) {
-      // Add character (only letters)
-      currentTypedText.value += key.toLowerCase();
+      return;
     }
 
-    // Update enemy highlighting and check for complete matches
-    updateEnemyHighlighting();
+    // Only process valid letter keys
+    if (key.length === 1 && /^[a-zA-Z]$/.test(key)) {
+      // Add character (only letters)
+      currentTypedText.value += key.toLowerCase();
+
+      // Update enemy highlighting and check for complete matches
+      updateEnemyHighlighting();
+    }
+    // Ignore any other keys (numbers, symbols, etc.) to prevent invalid input
   };
 
   // Reset typing state
@@ -347,33 +354,39 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   const handleWrongTyping = (reason: 'manual' | 'auto' = 'manual') => {
     const { enemies, player } = gameState.value;
 
-    // Trigger flash effect on currently highlighted enemy if it exists
+    // Store current state before clearing (for effects)
+    const hadTypedText = currentTypedText.value !== '';
     const currentlyHighlighted = enemies.find(enemy => enemy.isHighlighted);
-    if (currentlyHighlighted && currentlyHighlighted.typedProgress > 0) {
-      currentlyHighlighted.wrongTypingFlash = 1.0;
-    }
 
-    // Reduce player shield for invalid typing
-    player.shield = Math.max(0, player.shield - 10);
-
-    // Create damage number on player with appropriate message
-    const message = reason === 'auto' ? 'INVALID TEXT!' : 'WRONG TYPING!';
-    createDamageNumber(player.x, player.y - 30, 10, '#ff4444', false, message);
-
-    // Clear typing state
+    // IMMEDIATELY clear typing state to prevent race conditions
     currentTypedText.value = '';
-    wrongTypingEffect.value = 1;
     highlightedEnemyId.value = null;
+    wrongTypingEffect.value = 1;
 
     // Clear all enemy highlighting
     enemies.forEach(enemy => {
       enemy.isHighlighted = false;
       enemy.typedProgress = 0;
     });
+
+    // Only apply effects if we actually had typed text
+    if (hadTypedText) {
+      // Trigger flash effect on previously highlighted enemy if it exists
+      if (currentlyHighlighted && currentlyHighlighted.typedProgress > 0) {
+        currentlyHighlighted.wrongTypingFlash = 1.0;
+      }
+
+      // Reduce player shield for invalid typing
+      player.shield = Math.max(0, player.shield - 10);
+
+      // Create damage number on player with appropriate message
+      const message = reason === 'auto' ? 'INVALID TEXT!' : 'WRONG TYPING!';
+      createDamageNumber(player.x, player.y - 30, 10, '#ff4444', false, message);
+    }
   };
 
   // Update enemy highlighting based on current typed text
-  const updateEnemyHighlighting = () => {
+  const updateEnemyHighlighting = (fromRevalidation: boolean = false) => {
     const typedText = currentTypedText.value;
     const { enemies } = gameState.value;
 
@@ -412,7 +425,13 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
     // If no enemies match the typed text, handle wrong typing
     if (!hasAnyMatch) {
-      handleWrongTyping('manual');
+      // Only trigger wrong typing if this is NOT from a revalidation call
+      // This prevents infinite loops and ensures proper cleanup timing
+      if (!fromRevalidation) {
+        handleWrongTyping('manual');
+      } else {
+        handleWrongTyping('auto');
+      }
     } else {
       // Highlight ALL matching enemies
       for (const enemy of matchingEnemies) {
@@ -709,6 +728,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
   // Revalidate current typing against remaining enemies
   const revalidateTyping = () => {
+    // Double-check that we still have typed text (prevent race conditions)
     if (!currentTypedText.value) return;
 
     const typedText = currentTypedText.value;
@@ -726,10 +746,18 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
     // If no enemy matches the current typed text, handle wrong typing
     if (!hasMatchingEnemy) {
-      handleWrongTyping('auto');
+      // Clear the text immediately to prevent any potential race conditions
+      const wasTyping = currentTypedText.value !== '';
+      currentTypedText.value = '';
+
+      // Only show effects if we were actually typing something
+      if (wasTyping) {
+        handleWrongTyping('auto');
+      }
     } else {
       // Update highlighting for the remaining enemies
-      updateEnemyHighlighting();
+      // Pass true to indicate this is from revalidation
+      updateEnemyHighlighting(true);
     }
   };
 
