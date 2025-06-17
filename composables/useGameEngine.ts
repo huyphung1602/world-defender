@@ -337,10 +337,39 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     });
   };
 
+  // Handle wrong typing - consolidated logic
+  const handleWrongTyping = (reason: 'manual' | 'auto' = 'manual') => {
+    const { enemies, player } = gameState.value;
+
+    // Trigger flash effect on currently highlighted enemy if it exists
+    const currentlyHighlighted = enemies.find(enemy => enemy.isHighlighted);
+    if (currentlyHighlighted && currentlyHighlighted.typedProgress > 0) {
+      currentlyHighlighted.wrongTypingFlash = 1.0;
+    }
+
+    // Reduce player shield for invalid typing
+    player.shield = Math.max(0, player.shield - 10);
+
+    // Create damage number on player with appropriate message
+    const message = reason === 'auto' ? 'INVALID TEXT!' : 'WRONG TYPING!';
+    createDamageNumber(player.x, player.y - 30, 10, '#ff4444', false, message);
+
+    // Clear typing state
+    currentTypedText.value = '';
+    wrongTypingEffect.value = 1;
+    highlightedEnemyId.value = null;
+
+    // Clear all enemy highlighting
+    enemies.forEach(enemy => {
+      enemy.isHighlighted = false;
+      enemy.typedProgress = 0;
+    });
+  };
+
   // Update enemy highlighting based on current typed text
   const updateEnemyHighlighting = () => {
     const typedText = currentTypedText.value;
-    const { enemies, player } = gameState.value;
+    const { enemies } = gameState.value;
 
     // Clear previous highlighting
     enemies.forEach(enemy => {
@@ -367,28 +396,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       }
     }
 
-    // If no enemies match the typed text, auto-clear it
+    // If no enemies match the typed text, handle wrong typing
     if (!hasAnyMatch) {
-      // Trigger flash effect on currently highlighted enemy if it exists
-      const currentlyHighlighted = enemies.find(enemy => enemy.isHighlighted);
-      if (currentlyHighlighted && currentlyHighlighted.typedProgress > 0) {
-        currentlyHighlighted.wrongTypingFlash = 1.0;
-      }
-
-      // Reduce player shield for invalid typing (when enemies change/disappear)
-      player.shield = Math.max(0, player.shield - 10);
-
-      // Create damage number on player
-      createDamageNumber(player.x, player.y - 30, 10, '#ff4444', false, 'INVALID TEXT!');
-
-      currentTypedText.value = '';
-      wrongTypingEffect.value = 1;
-      // Clear all highlighting since we're resetting
-      enemies.forEach(enemy => {
-        enemy.isHighlighted = false;
-        enemy.typedProgress = 0;
-      });
-      highlightedEnemyId.value = null;
+      handleWrongTyping('manual');
     } else {
       // Highlight the best matching enemy
       if (bestMatch) {
@@ -684,7 +694,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     if (!currentTypedText.value) return;
 
     const typedText = currentTypedText.value;
-    const { enemies, player } = gameState.value;
+    const { enemies } = gameState.value;
 
     // Check if any remaining enemy matches the current typed text
     let hasMatchingEnemy = false;
@@ -696,28 +706,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       }
     }
 
-    // If no enemy matches the current typed text, clear it and show feedback
+    // If no enemy matches the current typed text, handle wrong typing
     if (!hasMatchingEnemy) {
-      // Trigger flash effect on currently highlighted enemy if it exists
-      const currentlyHighlighted = enemies.find(enemy => enemy.isHighlighted);
-      if (currentlyHighlighted && currentlyHighlighted.typedProgress > 0) {
-        currentlyHighlighted.wrongTypingFlash = 1.0;
-      }
-
-      // Reduce player shield for invalid typing (when enemies change/disappear)
-      player.shield = Math.max(0, player.shield - 10);
-
-      // Create damage number on player
-      createDamageNumber(player.x, player.y - 30, 10, '#ff4444', false, 'INVALID TEXT!');
-
-      currentTypedText.value = '';
-      wrongTypingEffect.value = 1;
-      // Clear all highlighting since we're resetting
-      enemies.forEach(enemy => {
-        enemy.isHighlighted = false;
-        enemy.typedProgress = 0;
-      });
-      highlightedEnemyId.value = null;
+      handleWrongTyping('auto');
     } else {
       // Update highlighting for the remaining enemies
       updateEnemyHighlighting();
@@ -750,5 +741,6 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     handleTyping, // Keep for backward compatibility
     handleLevelUpConfirmation,
     revalidateTyping,
+    handleWrongTyping, // Export for debugging if needed
   };
 }
