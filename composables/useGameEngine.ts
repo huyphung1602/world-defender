@@ -995,13 +995,29 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     availableSkillChoices.value = [];
   };
 
-  // Revalidate current typing against remaining enemies
+  // Revalidate current typing against remaining enemies and relic stars
   const revalidateTyping = () => {
     // Double-check that we still have typed text (prevent race conditions)
     if (!currentTypedText.value) return;
 
     const typedText = currentTypedText.value;
-    const { enemies } = gameState.value;
+    const { enemies, relicStars } = gameState.value;
+
+    // Check if ANY relic star matches the current typed text (relic stars have priority)
+    let hasMatchingRelicStar = false;
+    for (const star of relicStars) {
+      const starWord = star.word.toLowerCase();
+      if (starWord.startsWith(typedText)) {
+        hasMatchingRelicStar = true;
+        break;
+      }
+    }
+
+    // If a relic star matches, preserve the typing and update relic star highlighting
+    if (hasMatchingRelicStar) {
+      updateRelicStarHighlighting();
+      return; // Don't reset typing, user is typing a relic star
+    }
 
     // Check if ANY remaining enemy matches the current typed text
     let hasMatchingEnemy = false;
