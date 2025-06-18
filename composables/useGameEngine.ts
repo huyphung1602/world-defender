@@ -472,7 +472,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       // Add slight delay between shots for visual effect (only if multiple shots)
       const delay = tripleShot ? shotIndex * 50 : 0;
       setTimeout(() => {
-        fireProjectile(enemy, damage, isCritical, shotIndex > 0);
+        fireProjectile(enemy, damage, isCritical, shotIndex > 0, true);
       }, delay);
     }
   };
@@ -485,7 +485,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   };
 
   // Fire projectile
-  const fireProjectile = (target: Enemy, damage: number, isCritical: boolean, isMultiShot: boolean = false) => {
+  const fireProjectile = (target: Enemy, damage: number, isCritical: boolean, isMultiShot: boolean = false, isMainShot: boolean = false) => {
     const { player } = gameState.value;
     const projectile = createProjectile(
       player.x,
@@ -501,7 +501,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       isMultiShot,
       false, // isDoubleShot (frozen bullets)
       player.bounceCount,
-      0.25
+      0.25,
+      isMainShot
     );
     projectiles.value.push(projectile);
   };
@@ -533,7 +534,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
           false, // isMultiShot
           true, // isFrozenBullet
           0, // bounceCount
-          0 // bounceChance
+          0, // bounceChance
+          false // isMainShot - frozen bullets are not main shots
         );
         projectiles.value.push(projectile);
       }
@@ -567,11 +569,11 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   };
 
   // Handle projectile hit
-  const handleProjectileHit = (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean) => {
+  const handleProjectileHit = (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean, isMainShot: boolean) => {
     const enemy = gameState.value.enemies.find(e => e.id === enemyId);
     if (!enemy) return;
 
-    applyDamageToEnemy(enemy, damage, isCritical);
+    applyDamageToEnemy(enemy, damage, isCritical, isMainShot);
 
     if (isMultiShot) {
       createDamageNumber(enemy.x + 15, enemy.y - 15, damage, '#00ffff', isCritical);
@@ -588,7 +590,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   };
 
   // Apply damage to enemy
-  const applyDamageToEnemy = (enemy: Enemy, damage: number, isCritical: boolean) => {
+  const applyDamageToEnemy = (enemy: Enemy, damage: number, isCritical: boolean, isMainShot: boolean) => {
     const enemyCountBefore = gameState.value.enemies.length;
     const enemyWordBefore = enemy.word;
 
@@ -602,7 +604,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       () => {
         createExplosion(gameState.value.player.x, gameState.value.player.y, '#ffffff', 50, 0);
       },
-      availableSkillChoices
+      availableSkillChoices,
+      isMainShot
     );
 
     // Revalidate typing if enemy was removed or its word changed
@@ -638,7 +641,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     const explosion = importedCreateExplosion(
       x, y, color, radius, damage,
       damage > 0 ? gameState.value.enemies : [],
-      (enemy, dmg, isCritical) => applyDamageToEnemy(enemy, dmg, isCritical)
+      (enemy, dmg, isCritical) => applyDamageToEnemy(enemy, dmg, isCritical, false)
     );
     explosions.value.push(explosion);
   };
@@ -680,14 +683,14 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
           autoFireLaserOpacity.value = 1;
 
           setTimeout(() => {
-            fireProjectile(enemy, player.damage * 0.8, false);
+            fireProjectile(enemy, player.damage * 0.8, false, false, false);
 
             setTimeout(() => {
               autoFireTarget.value = null;
               autoFireLaserOpacity.value = 0;
             }, 200);
           }, 500);
-        });
+        }, currentTypedText.value);
 
         player.nextAutoFireTime = now + autoFireInterval;
       }

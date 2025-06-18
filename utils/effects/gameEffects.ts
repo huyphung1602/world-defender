@@ -28,6 +28,7 @@ export interface Projectile {
   lastBounceX: number | null; // Last bounce X position (for trail rendering)
   lastBounceY: number | null; // Last bounce Y position (for trail rendering)
   bounceChance: number; // Chance to bounce (0-1)
+  isMainShot: boolean; // True for main shots (from user typing), false for auto-fire/multi-shot/bounce
 }
 
 /**
@@ -180,7 +181,8 @@ export const createProjectile = (
   isMultiShot: boolean = false,
   isDoubleShot: boolean = false,
   bouncesLeft: number = 0,
-  bounceChance: number = 0.25 // Default 25% chance to bounce
+  bounceChance: number = 0.25, // Default 25% chance to bounce
+  isMainShot: boolean = false // Default false for backward compatibility
 ): Projectile => {
   return {
     x: startX,
@@ -202,7 +204,8 @@ export const createProjectile = (
     hitEnemyIds: [],
     lastBounceX: null,
     lastBounceY: null,
-    bounceChance
+    bounceChance,
+    isMainShot
   };
 };
 
@@ -289,7 +292,7 @@ export const updateProjectiles = (
   projectiles: Projectile[], 
   deltaTime: number,
   enemies: any[], // Using any to avoid circular dependencies
-  onHitEnemy: (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean) => void,
+  onHitEnemy: (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean, isMainShot: boolean) => void,
   onCreateExplosion: (x: number, y: number, color: string, radius: number, damage: number) => void
 ): void => {
   for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -359,7 +362,8 @@ export const updateProjectiles = (
           projectile.damage, 
           projectile.isCritical,
           projectile.isMultiShot,
-          projectile.isDoubleShot
+          projectile.isDoubleShot,
+          projectile.isMainShot
         );
         
         // Create AOE explosion if needed
@@ -383,7 +387,7 @@ export const updateProjectiles = (
             (enemyId, damage, isCritical) => {
               // Skip the primary target (already damaged)
               if (enemyId !== closestEnemy.id) {
-                onHitEnemy(enemyId, damage, isCritical, false, false);
+                onHitEnemy(enemyId, damage, isCritical, false, false, false);
               }
             }
           );

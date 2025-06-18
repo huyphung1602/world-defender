@@ -205,7 +205,8 @@ export const applyDamageToEnemy = (
   onCreateExplosion: (x: number, y: number, color: string, radius?: number, damage?: number) => void,
   onCreateDamageNumber: (x: number, y: number, value: number, color: string, isCritical?: boolean) => void,
   onLevelUp: () => void,
-  availableSkillChoices: { value: Skill[] }
+  availableSkillChoices: { value: Skill[] },
+  isMainShot: boolean = false // Only main shots (from user typing) should change words
 ): void => {
   enemy.health -= damage;
 
@@ -219,7 +220,8 @@ export const applyDamageToEnemy = (
   );
 
   // Change the enemy word when it takes damage but isn't defeated
-  if (enemy.health > 0) {
+  // ONLY for main shots (user-typed shots) to avoid interfering with typing
+  if (enemy.health > 0 && isMainShot) {
     // Get a new random word
     const newWord = getRandomWord();
     // Only change if it's different to avoid confusion
@@ -263,15 +265,29 @@ export const applyDamageToEnemy = (
  */
 export const autoFireAtEnemies = (
   gameState: GameState,
-  onFireProjectile: (enemy: Enemy) => void
+  onFireProjectile: (enemy: Enemy) => void,
+  currentTypedText: string = '' // Add parameter to know what user is typing
 ): void => {
   if (gameState.isGameOver || gameState.isPausedBetweenWaves) return;
 
-  // Find closest enemy
+  // Separate enemies into two groups: those matching user typing and those not matching
+  const nonTypedEnemies: Enemy[] = [];
+  const typedEnemies: Enemy[] = [];
+
+  for (const enemy of gameState.enemies) {
+    if (currentTypedText && enemy.word.toLowerCase().startsWith(currentTypedText.toLowerCase())) {
+      typedEnemies.push(enemy);
+    } else {
+      nonTypedEnemies.push(enemy);
+    }
+  }
+
+  // Find closest enemy from preferred group (prioritize non-typed enemies)
+  let targetGroup = nonTypedEnemies.length > 0 ? nonTypedEnemies : typedEnemies;
   let closestEnemy = null;
   let closestDistance = Infinity;
 
-  for (const enemy of gameState.enemies) {
+  for (const enemy of targetGroup) {
     const dx = enemy.x - gameState.player.x;
     const dy = enemy.y - gameState.player.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
