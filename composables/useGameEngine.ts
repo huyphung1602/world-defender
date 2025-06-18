@@ -2,9 +2,16 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import type {
   GameState,
   Enemy,
-  Skill
+  Skill,
+  Relic,
+  RelicStar
 } from '../utils/gameModels';
-import { createInitialGameState} from '../utils/gameModels';
+import {
+  createInitialGameState,
+  generateRelics,
+  getRandomRelic,
+  createRelicStar
+} from '../utils/gameModels';
 import {
   type Projectile,
   type Explosion,
@@ -24,12 +31,15 @@ import {
   startWave as startWaveMechanic,
   applyDamageToEnemy as applyDamageToEnemyMechanic,
   autoFireAtEnemies,
+  pauseEnemySpawning,
+  resumeEnemySpawning,
 } from '../utils/mechanics/gameMechanics';
 
 export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   // Core game state
   const gameState = ref<GameState>(createInitialGameState(canvasWidth, canvasHeight));
   const isPaused = ref(false);
+  const isRelicAnnouncementPaused = ref(false);
 
   // Visual effects state
   const projectiles = ref<Projectile[]>([]);
@@ -44,6 +54,13 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
   // Level up state
   const availableSkillChoices = ref<Skill[]>([]);
+
+  // Relic system state
+  const availableRelics = ref<Relic[]>(generateRelics());
+  const relicStarSpawnTimer = ref<number>(0);
+  const nextRelicStarSpawn = ref<number>(0);
+  const highlightedRelicStarId = ref<number | null>(null);
+  const announcedRelic = ref<Relic | null>(null);
 
   // Timer tracking
   const spawnTimerId = ref<number>(0);
@@ -62,6 +79,74 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   const highlightedEnemyId = ref<number | null>(null);
   const wrongTypingEffect = ref(0); // For visual feedback on wrong typing
 
+  // Centralized Pause System
+  const pauseSystem = {
+    isPaused: false,
+    pauseStartTime: 0,
+    totalPausedDuration: 0,
+    savedTimerStates: {
+      nextRelicStarSpawn: 0,
+      autoFireNextTime: 0,
+      frozenBulletNextTime: 0,
+    },
+
+    // Start pause (used by all pause types)
+    startPause: () => {
+      if (pauseSystem.isPaused) return; // Already paused
+
+      const now = Date.now();
+      pauseSystem.isPaused = true;
+      pauseSystem.pauseStartTime = now;
+
+      // Save relative timer states
+      pauseSystem.savedTimerStates = {
+        nextRelicStarSpawn: nextRelicStarSpawn.value - now,
+        autoFireNextTime: gameState.value.player.nextAutoFireTime ? gameState.value.player.nextAutoFireTime - now : 0,
+        frozenBulletNextTime: gameState.value.player.nextFrozenBulletTime ? gameState.value.player.nextFrozenBulletTime - now : 0,
+      };
+
+      // Pause enemy spawning
+      pauseEnemySpawning({ value: spawnTimerId.value });
+    },
+
+    // End pause (used by all pause types)
+    endPause: () => {
+      if (!pauseSystem.isPaused) return; // Not paused
+
+      const now = Date.now();
+      const pauseDuration = now - pauseSystem.pauseStartTime;
+
+      // Update total paused duration and adjust game timer
+      pauseSystem.totalPausedDuration += pauseDuration;
+      gameState.value.startTime += pauseDuration;
+
+      // Restore relative timers
+      nextRelicStarSpawn.value = now + pauseSystem.savedTimerStates.nextRelicStarSpawn;
+
+      if (pauseSystem.savedTimerStates.autoFireNextTime > 0) {
+        gameState.value.player.nextAutoFireTime = now + pauseSystem.savedTimerStates.autoFireNextTime;
+      }
+
+      if (pauseSystem.savedTimerStates.frozenBulletNextTime > 0) {
+        gameState.value.player.nextFrozenBulletTime = now + pauseSystem.savedTimerStates.frozenBulletNextTime;
+      }
+
+      // Resume enemy spawning
+      resumeEnemySpawning(
+        gameState.value,
+        canvasWidth,
+        canvasHeight,
+        () => {},
+        () => {},
+        { value: spawnTimerId.value },
+        isEffectivelyPaused
+      );
+
+      pauseSystem.isPaused = false;
+      pauseSystem.pauseStartTime = 0;
+    }
+  };
+
   // Initialize stars
   onMounted(() => {
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
@@ -79,6 +164,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     // Reset game state
     gameState.value = createInitialGameState(canvasWidth, canvasHeight);
     gameState.value.isPlaying = true;
+    gameState.value.startTime = Date.now(); // Set game start time
     projectiles.value = [];
     explosions.value = [];
     damageNumbers.value = [];
@@ -90,6 +176,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     // Reset timers
     clearInterval(spawnTimerId.value);
     clearInterval(autoFireTimerId.value);
+
+    // Initialize relic spawn system
+    nextRelicStarSpawn.value = Date.now() + (20000 + Math.random() * 10000); // First spawn after 20-30 seconds
 
     // Initialize stars
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
@@ -113,6 +202,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     // Reset game state completely (same as startGame)
     gameState.value = createInitialGameState(canvasWidth, canvasHeight);
     gameState.value.isPlaying = true;
+    gameState.value.startTime = Date.now(); // Set game start time
     projectiles.value = [];
     explosions.value = [];
     damageNumbers.value = [];
@@ -120,6 +210,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
     // Reset typing state
     resetTyping();
+
+    // Initialize relic spawn system
+    nextRelicStarSpawn.value = Date.now() + (20000 + Math.random() * 10000); // First spawn after 20-30 seconds
 
     // Initialize stars
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
@@ -131,13 +224,6 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     lastUpdateTime.value = performance.now();
     lastRenderTime.value = performance.now();
     updateGame();
-  };
-
-  // Toggle pause
-  const togglePause = () => {
-    if (gameState.value.isPlaying && !gameState.value.isGameOver && !gameState.value.isPausedForLevelUp) {
-      isPaused.value = !isPaused.value;
-    }
   };
 
   // Game update loop
@@ -158,8 +244,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     lastUpdateTime.value = now;
     lastRenderTime.value = now;
 
-    // Only update game state if not paused, not level up screen, and game is active
-    if (!isPaused.value && gameState.value.isPlaying && !gameState.value.isGameOver && !gameState.value.isPausedForLevelUp) {
+    // Only update game state if not effectively paused and game is active
+    if (!isEffectivelyPaused() && gameState.value.isPlaying && !gameState.value.isGameOver) {
       updateGameState();
     }
 
@@ -172,6 +258,15 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   const updateGameState = () => {
     const { player, enemies } = gameState.value;
 
+    // Check for victory condition - 20 minutes (1,200,000 milliseconds)
+    if (gameState.value.startTime > 0 && Date.now() - gameState.value.startTime >= 1200000) {
+      gameState.value.isGameOver = true;
+      gameState.value.gameWon = true;
+      clearInterval(spawnTimerId.value);
+      clearInterval(autoFireTimerId.value);
+      return; // Exit early to prevent further updates
+    }
+
     // Update frozen effects on enemies
     for (const enemy of enemies) {
       if (enemy.isFrozen && enemy.frozenUntil && Date.now() > enemy.frozenUntil) {
@@ -183,6 +278,19 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
         if (enemy.color.includes('88')) {
           enemy.color = enemy.color.replace('88', '');
         }
+      }
+    }
+
+    // Update relic stars
+    updateRelicStars();
+
+    // Spawn new relic stars periodically (only if not effectively paused)
+    if (!isEffectivelyPaused()) {
+      const now = Date.now();
+      if (now >= nextRelicStarSpawn.value) {
+        spawnRelicStar();
+        // Schedule next relic star spawn (30-60 seconds)
+        nextRelicStarSpawn.value = now + (30000 + Math.random() * 30000);
       }
     }
 
@@ -267,19 +375,24 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     updateExplosions(explosions.value, deltaTime.value);
     updateDamageNumbers(damageNumbers.value, deltaTime.value);
 
-    // Check wave completion
+    // Check wave completion and handle continuous spawning
     if (gameState.value.waveEnemiesDefeated >= gameState.value.waveEnemyCount &&
         enemies.length === 0 &&
         !gameState.value.isPausedForLevelUp &&
         !gameState.value.isPausedBetweenWaves) {
+      // Start next wave immediately without countdown
       startWave(gameState.value.wave + 1);
     }
 
-    // Update auto-fire
-    updateAutoFire();
+    // Update auto-fire (only if not effectively paused)
+    if (!isEffectivelyPaused()) {
+      updateAutoFire();
+    }
 
-    // Update frozen bullets
-    updateFrozenBullets();
+    // Update frozen bullets (only if not effectively paused)
+    if (!isEffectivelyPaused()) {
+      updateFrozenBullets();
+    }
 
     // Shield regeneration
     if (player.shield < player.maxShield) {
@@ -343,10 +456,15 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   const resetTyping = () => {
     currentTypedText.value = '';
     highlightedEnemyId.value = null;
+    highlightedRelicStarId.value = null;
     // Clear all enemy highlighting
     gameState.value.enemies.forEach(enemy => {
       enemy.isHighlighted = false;
       enemy.typedProgress = 0;
+    });
+    // Clear all relic star highlighting
+    gameState.value.relicStars.forEach(star => {
+      star.typedProgress = 0;
     });
   };
 
@@ -385,73 +503,76 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     }
   };
 
-  // Update enemy highlighting based on current typed text
+  // Update enemy highlighting based on typed text
   const updateEnemyHighlighting = (fromRevalidation: boolean = false) => {
-    const typedText = currentTypedText.value;
+    if (currentTypedText.value.length === 0) {
+      highlightedEnemyId.value = null;
+      highlightedRelicStarId.value = null;
+      // Clear all highlights
+      gameState.value.enemies.forEach(enemy => {
+        enemy.isHighlighted = false;
+        enemy.typedProgress = 0;
+      });
+      return;
+    }
+
+    // Check relic stars first (they have priority)
+    updateRelicStarHighlighting();
+
+    // If a relic star is highlighted, don't highlight enemies
+    if (highlightedRelicStarId.value !== null) {
+      highlightedEnemyId.value = null;
+      // Clear all enemy highlights
+      gameState.value.enemies.forEach(enemy => {
+        enemy.isHighlighted = false;
+        enemy.typedProgress = 0;
+      });
+      return;
+    }
+
+    // NEW LOGIC: Highlight ALL enemies that match the typed text
     const { enemies } = gameState.value;
+    const typedText = currentTypedText.value.toLowerCase();
 
-    // Clear previous highlighting
-    enemies.forEach(enemy => {
-      enemy.isHighlighted = false;
-      enemy.typedProgress = 0;
-    });
-    highlightedEnemyId.value = null;
-
-    if (!typedText) return;
-
-    // Find ALL matching enemies and determine the primary target
-    let primaryTarget: Enemy | null = null;
-    let primaryTargetDistance = Infinity;
     let hasAnyMatch = false;
-    const matchingEnemies: Enemy[] = [];
+    let completedEnemy: Enemy | null = null;
 
+    // Check all enemies for matches
     for (const enemy of enemies) {
       const enemyWord = enemy.word.toLowerCase();
+
       if (enemyWord.startsWith(typedText)) {
-        hasAnyMatch = true;
-        matchingEnemies.push(enemy);
-
-        // Calculate distance from player to determine primary target (closest enemy)
-        const dx = enemy.x - gameState.value.player.x;
-        const dy = enemy.y - gameState.value.player.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < primaryTargetDistance) {
-          primaryTarget = enemy;
-          primaryTargetDistance = distance;
-        }
-      }
-    }
-
-    // If no enemies match the typed text, handle wrong typing
-    if (!hasAnyMatch) {
-      // Only trigger wrong typing if this is NOT from a revalidation call
-      // This prevents infinite loops and ensures proper cleanup timing
-      if (!fromRevalidation) {
-        handleWrongTyping('manual');
-      } else {
-        handleWrongTyping('auto');
-      }
-    } else {
-      // Highlight ALL matching enemies
-      for (const enemy of matchingEnemies) {
+        // This enemy matches - highlight it
         enemy.isHighlighted = true;
-        enemy.typedProgress = typedText.length;
-      }
+        enemy.typedProgress = typedText.length / enemyWord.length;
+        hasAnyMatch = true;
 
-      // Set the primary target (closest enemy) as the highlighted enemy ID
-      if (primaryTarget) {
-        highlightedEnemyId.value = primaryTarget.id;
-
-        // Check if we have a complete match with the primary target
-        if (typedText === primaryTarget.word.toLowerCase()) {
-          // Fire at the primary target
-          fireAtEnemy(primaryTarget);
-          // Reset typing
-          resetTyping();
+        // Check if this word is completely typed
+        if (enemyWord === typedText) {
+          completedEnemy = enemy;
         }
+      } else {
+        // This enemy doesn't match - remove highlight
+        enemy.isHighlighted = false;
+        enemy.typedProgress = 0;
       }
     }
+
+    // If we found a completed word, fire at that enemy
+    if (completedEnemy) {
+      fireAtEnemy(completedEnemy);
+      resetTyping();
+      return;
+    }
+
+    // If no enemies match and we're not from revalidation, handle wrong typing
+    if (!hasAnyMatch && !fromRevalidation && currentTypedText.value.length > 0) {
+      handleWrongTyping();
+    }
+
+    // Update highlightedEnemyId for other systems (can be any highlighted enemy or null)
+    const firstHighlighted = enemies.find(enemy => enemy.isHighlighted);
+    highlightedEnemyId.value = firstHighlighted ? firstHighlighted.id : null;
   };
 
   // Fire at a specific enemy
@@ -484,26 +605,30 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     console.warn('Legacy handleTyping called, use handleKeyPress instead');
   };
 
-  // Fire projectile
+  // Fire a projectile at a target enemy
   const fireProjectile = (target: Enemy, damage: number, isCritical: boolean, isMultiShot: boolean = false, isMainShot: boolean = false) => {
-    const { player } = gameState.value;
+    // Apply multipliers
+    const finalDamage = Math.floor(damage * gameState.value.player.damageMultiplier);
+    const finalSpeed = gameState.value.player.projectileSpeed;
+
     const projectile = createProjectile(
-      player.x,
-      player.y,
+      gameState.value.player.x,
+      gameState.value.player.y,
       target.x,
       target.y,
-      damage,
-      player.projectileSpeed,
-      player.projectileSize,
+      finalDamage,
+      finalSpeed,
+      gameState.value.player.projectileSize,
       isCritical,
-      player.aoeRadius,
+      gameState.value.player.aoeRadius,
       target.id,
       isMultiShot,
-      false, // isDoubleShot (frozen bullets)
-      player.bounceCount,
-      0.25,
+      false, // isDoubleShot
+      gameState.value.player.bounceCount,
+      0.35 + (gameState.value.player.bounceCount * 0.1), // Bounce chance scales with bounce count
       isMainShot
     );
+
     projectiles.value.push(projectile);
   };
 
@@ -576,7 +701,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     applyDamageToEnemy(enemy, damage, isCritical, isMainShot);
 
     if (isMultiShot) {
-      createDamageNumber(enemy.x + 15, enemy.y - 15, damage, '#00ffff', isCritical);
+      createDamageNumber(enemy.x + 15, enemy.y - 15, Math.round(damage), '#00ffff', isCritical);
     }
 
     if (isDoubleShot) {
@@ -602,7 +727,10 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       createExplosion,
       createDamageNumber,
       () => {
+        // Level up effect
         createExplosion(gameState.value.player.x, gameState.value.player.y, '#ffffff', 50, 0);
+        // Start pause using centralized system for level up
+        pauseSystem.startPause();
       },
       availableSkillChoices,
       isMainShot
@@ -636,12 +764,146 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     createExplosion(enemy.x, enemy.y, '#00ffff', 30, 0);
   };
 
+  // Relic star management functions
+  const spawnRelicStar = () => {
+    const relic = getRandomRelic(availableRelics.value);
+    const relicStar = createRelicStar(
+      Date.now(), // Use timestamp as unique ID
+      relic,
+      canvasWidth,
+      canvasHeight
+    );
+    gameState.value.relicStars.push(relicStar);
+  };
+
+  const updateRelicStars = () => {
+    const now = Date.now();
+    for (let i = gameState.value.relicStars.length - 1; i >= 0; i--) {
+      const star = gameState.value.relicStars[i];
+
+      // Update position
+      star.x += star.velocityX * deltaTime.value * 60; // Scale for consistent speed
+      star.y += star.velocityY * deltaTime.value * 60;
+
+      // Update pulse and glow effects
+      star.pulsePhase += deltaTime.value * 3;
+      star.glowIntensity = 0.7 + Math.sin(star.pulsePhase) * 0.3;
+
+      // Update trail
+      if (star.trail.length > 0) {
+        for (const trailPoint of star.trail) {
+          trailPoint.opacity *= 0.95;
+        }
+        star.trail = star.trail.filter(point => point.opacity > 0.1);
+      }
+      star.trail.unshift({ x: star.x, y: star.y, opacity: 1 });
+      if (star.trail.length > 8) {
+        star.trail.pop();
+      }
+
+      // Update time remaining
+      star.timeRemaining -= deltaTime.value * 1000;
+
+      // Remove star if expired or off-screen
+      if (star.timeRemaining <= 0 ||
+          star.x < -100 || star.x > canvasWidth + 100 ||
+          star.y < -100 || star.y > canvasHeight + 100) {
+        gameState.value.relicStars.splice(i, 1);
+        if (highlightedRelicStarId.value === star.id) {
+          highlightedRelicStarId.value = null;
+        }
+      }
+    }
+  };
+
+  const collectRelicStar = (star: RelicStar) => {
+    // Apply relic effect to player
+    star.relic.applyEffect(gameState.value.player);
+    gameState.value.player.relics.push(star.relic);
+
+    // Show announcement modal and pause game using centralized system
+    announcedRelic.value = star.relic;
+    isRelicAnnouncementPaused.value = true;
+    pauseSystem.startPause();
+
+    // Create celebration effect
+    createExplosion(star.x, star.y, star.relic.auraColor, 40, 0);
+    createDamageNumber(star.x, star.y - 20, 0, star.relic.auraColor, false, `${star.relic.icon} ${star.relic.name}`);
+
+    // Remove star
+    const index = gameState.value.relicStars.indexOf(star);
+    if (index > -1) {
+      gameState.value.relicStars.splice(index, 1);
+    }
+
+    // Reset typing if this was the highlighted star
+    if (highlightedRelicStarId.value === star.id) {
+      resetTyping();
+    }
+  };
+
+  const closeRelicAnnouncement = () => {
+    // End pause using centralized system
+    pauseSystem.endPause();
+
+    announcedRelic.value = null;
+    isRelicAnnouncementPaused.value = false;
+  };
+
+  const updateRelicStarHighlighting = () => {
+    if (currentTypedText.value.length === 0) {
+      highlightedRelicStarId.value = null;
+      // Clear all relic star highlighting
+      gameState.value.relicStars.forEach(star => {
+        star.typedProgress = 0;
+      });
+      return;
+    }
+
+    // Find the best matching relic star
+    let bestMatch: RelicStar | null = null;
+    let bestScore = -1;
+    const typedText = currentTypedText.value.toLowerCase();
+
+    // Clear all relic star highlighting first
+    gameState.value.relicStars.forEach(star => {
+      star.typedProgress = 0;
+    });
+
+    for (const star of gameState.value.relicStars) {
+      const word = star.word.toLowerCase();
+
+      if (word.startsWith(typedText)) {
+        const score = typedText.length / word.length;
+        star.typedProgress = score; // Set typing progress
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = star;
+        }
+      }
+    }
+
+    if (bestMatch && bestScore >= 0.1) { // Require at least 10% match
+      highlightedRelicStarId.value = bestMatch.id;
+
+      // Check if word is complete
+      if (bestMatch.word.toLowerCase() === currentTypedText.value.toLowerCase()) {
+        collectRelicStar(bestMatch);
+        resetTyping();
+      }
+    } else {
+      highlightedRelicStarId.value = null;
+    }
+  };
+
   // Create explosion effect
   const createExplosion = (x: number, y: number, color: string, radius: number = 30, damage: number = 0) => {
     const explosion = importedCreateExplosion(
       x, y, color, radius, damage,
       damage > 0 ? gameState.value.enemies : [],
-      (enemy, dmg, isCritical) => applyDamageToEnemy(enemy, dmg, isCritical, false)
+      (enemy, dmg, isCritical) => applyDamageToEnemy(enemy, dmg, isCritical, false),
+      gameState.value.player // Pass player for Nova Core effects
     );
     explosions.value.push(explosion);
   };
@@ -665,7 +927,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       canvasHeight,
       () => {},
       () => {},
-      { value: spawnTimerId.value }
+      { value: spawnTimerId.value },
+      isEffectivelyPaused
     );
   };
 
@@ -725,6 +988,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       gameStateSkill.applyEffect(gameState.value.player);
     }
 
+    // End pause using centralized system
+    pauseSystem.endPause();
+
     gameState.value.isPausedForLevelUp = false;
     availableSkillChoices.value = [];
   };
@@ -737,7 +1003,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     const typedText = currentTypedText.value;
     const { enemies } = gameState.value;
 
-    // Check if any remaining enemy matches the current typed text
+    // Check if ANY remaining enemy matches the current typed text
     let hasMatchingEnemy = false;
     for (const enemy of enemies) {
       const enemyWord = enemy.word.toLowerCase();
@@ -758,9 +1024,29 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
         handleWrongTyping('auto');
       }
     } else {
-      // Update highlighting for the remaining enemies
+      // Update highlighting for all remaining matching enemies
       // Pass true to indicate this is from revalidation
       updateEnemyHighlighting(true);
+    }
+  };
+
+  // Check if game is effectively paused (regular pause OR relic announcement)
+  const isEffectivelyPaused = () => {
+    return isPaused.value || isRelicAnnouncementPaused.value || gameState.value.isPausedForLevelUp;
+  };
+
+  // Enhanced pause system using centralized pause mechanism
+  const togglePause = () => {
+    if (gameState.value.isPlaying && !gameState.value.isGameOver && !isRelicAnnouncementPaused.value) {
+      if (!isPaused.value) {
+        // Start pause
+        pauseSystem.startPause();
+        isPaused.value = true;
+      } else {
+        // End pause
+        pauseSystem.endPause();
+        isPaused.value = false;
+      }
     }
   };
 
@@ -775,7 +1061,11 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     autoFireLaserOpacity,
     deltaTime,
     isPaused,
+    isRelicAnnouncementPaused,
     availableSkillChoices,
+    // Relic system
+    highlightedRelicStarId,
+    announcedRelic,
     // Typing state
     currentTypedText,
     highlightedEnemyId,
@@ -787,9 +1077,17 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     updateGame,
     handleKeyPress,
     resetTyping,
-    handleTyping, // Keep for backward compatibility
+    handleTyping,
     handleLevelUpConfirmation,
+    updateGameState, // Export for debugging if needed
+    updateEnemyHighlighting, // Export for debugging if needed
     revalidateTyping,
     handleWrongTyping, // Export for debugging if needed
+    spawnRelicStar,
+    updateRelicStars,
+    collectRelicStar,
+    updateRelicStarHighlighting,
+    closeRelicAnnouncement,
+    isEffectivelyPaused,
   };
 }

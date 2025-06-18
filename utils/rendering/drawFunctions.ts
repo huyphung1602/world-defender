@@ -271,15 +271,6 @@ export const drawPlayer = (ctx: CanvasRenderingContext2D, player: any): void => 
     ctx.shadowBlur = 0;
     ctx.shadowColor = 'transparent';
   }
-
-  // Display player level above (not rotated)
-  ctx.font = 'bold 14px Arial';
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'center';
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-  ctx.lineWidth = 3;
-  ctx.strokeText(`Lvl ${player.level}`, player.x, player.y - player.radius - 45);
-  ctx.fillText(`Lvl ${player.level}`, player.x, player.y - player.radius - 45);
 };
 
 /**
@@ -375,52 +366,59 @@ export const drawEnemy = (ctx: CanvasRenderingContext2D, enemy: any): void => {
     textY = enemy.y - enemy.radius - 20;
   }
 
-  // Simplified text stroke for better performance
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-  ctx.lineWidth = 3; // Increased stroke for larger text
-  ctx.strokeText(enemy.word, enemy.x, textY);
-
   // Draw enemy word with highlighting if it's the highlighted enemy
   if (enemy.isHighlighted && enemy.typedProgress > 0) {
-    // Draw typed portion - use red if wrong typing flash is active, otherwise green
-    const typedPortion = enemy.word.substring(0, enemy.typedProgress);
-    const remainingPortion = enemy.word.substring(enemy.typedProgress);
+    // Calculate the number of characters typed based on progress
+    const typedLength = Math.floor(enemy.typedProgress * enemy.word.length);
+    const typedPortion = enemy.word.substring(0, typedLength);
+    const remainingPortion = enemy.word.substring(typedLength);
 
     // Measure text to position the parts correctly
     const typedWidth = ctx.measureText(typedPortion).width;
     const totalWidth = ctx.measureText(enemy.word).width;
+    const remainingWidth = ctx.measureText(remainingPortion).width;
 
     // Determine typed portion color based on flash effect
     const typedColor = enemy.wrongTypingFlash > 0 ?
       `rgba(255, 0, 0, ${0.8 + enemy.wrongTypingFlash * 0.2})` : // Red with intensity
-      '#00ff00'; // Green
+      '#00ff00'; // Bright green
 
-    // Draw typed portion with appropriate color
-    ctx.fillStyle = typedColor;
-    ctx.fillText(typedPortion, enemy.x - totalWidth / 2 + typedWidth / 2, textY);
+    // Calculate positioning for each portion
+    const startX = enemy.x - totalWidth / 2;
+    const typedX = startX + typedWidth / 2;
+    const remainingX = startX + typedWidth + remainingWidth / 2;
 
-    // Draw remaining portion (white)
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(remainingPortion, enemy.x - totalWidth / 2 + typedWidth + ctx.measureText(remainingPortion).width / 2, textY);
+    // Draw background stroke for both portions
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(enemy.word, enemy.x, textY);
 
-    // Add extra glow for highlighted enemy (adjust color based on flash)
+    // Draw typed portion with appropriate color and glow
     if (enemy.wrongTypingFlash > 0) {
       ctx.shadowColor = '#ff0000';
       ctx.shadowBlur = 15 * enemy.wrongTypingFlash;
-      ctx.fillStyle = typedColor;
-      ctx.fillText(typedPortion, enemy.x - totalWidth / 2 + typedWidth / 2, textY);
     } else {
       ctx.shadowColor = '#00ff00';
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = '#00ff00';
-      ctx.fillText(typedPortion, enemy.x - totalWidth / 2 + typedWidth / 2, textY);
+      ctx.shadowBlur = 12;
     }
+    ctx.fillStyle = typedColor;
+    ctx.textAlign = 'left';
+    ctx.fillText(typedPortion, startX, textY);
 
-    // Reset shadow
+    // Reset shadow and draw remaining portion (white)
     ctx.shadowBlur = 0;
     ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(remainingPortion, startX + typedWidth, textY);
+
+    // Reset text alignment
+    ctx.textAlign = 'center';
   } else {
-    // Draw normal text
+    // Draw normal text with stroke
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(enemy.word, enemy.x, textY);
+
     ctx.fillStyle = enemy.isHighlighted ? '#ffff00' : '#ffffff'; // Highlighted enemies get yellow text
     ctx.fillText(enemy.word, enemy.x, textY);
   }

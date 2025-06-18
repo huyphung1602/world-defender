@@ -2,7 +2,8 @@ import { ref, onMounted, nextTick } from 'vue';
 import type {
   GameState,
   Enemy,
-  Player
+  Player,
+  RelicStar
 } from '../utils/gameModels';
 import type {
   Projectile,
@@ -286,14 +287,253 @@ export function useGameRenderer(canvasWidth: number, canvasHeight: number) {
     drawPlayer(ctx.value, player);
   };
 
-  // Draw wave indicator
-  const drawWaveIndicator = (wave: number) => {
+  // Draw current typed text below the player
+  const drawTypedText = (player: Player, typedText: string) => {
+    if (!ctx.value || !typedText) return;
+    
+    ctx.value.font = 'bold 20px Arial'; // Slightly smaller than before
+    ctx.value.fillStyle = '#ffff00'; // Changed from blue to yellow
+    ctx.value.textAlign = 'center';
+    ctx.value.textBaseline = 'middle';
+    
+    // Position text above the Earth where level used to be
+    const textY = player.y - player.radius - 45;
+    
+    // Add stroke for better visibility
+    ctx.value.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.value.lineWidth = 3;
+    ctx.value.strokeText(typedText, player.x, textY);
+    
+    // Draw text without background
+    ctx.value.fillText(typedText, player.x, textY);
+  };
+
+  // Draw all relic stars
+  const drawRelicStars = (relicStars: RelicStar[], highlightedRelicStarId: number | null) => {
     if (!ctx.value) return;
 
-    ctx.value.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.value.font = 'bold 24px Arial';
-    ctx.value.textAlign = 'center';
-    ctx.value.fillText(`Wave ${wave}`, canvasWidth / 2, 50);
+    relicStars.forEach(star => {
+      const isHighlighted = highlightedRelicStarId === star.id;
+
+      // Draw trail first
+      if (star.trail.length > 1) {
+        ctx.value!.save();
+        for (let i = 1; i < star.trail.length; i++) {
+          const trailPoint = star.trail[i];
+          const prevPoint = star.trail[i - 1];
+
+          const trailAlpha = trailPoint.opacity * 0.6;
+          const trailSize = star.size * (trailPoint.opacity * 0.8);
+
+          // Create gradient for trail segment
+          const gradient = ctx.value!.createRadialGradient(
+            trailPoint.x, trailPoint.y, 0,
+            trailPoint.x, trailPoint.y, trailSize
+          );
+          gradient.addColorStop(0, `${star.relic.auraColor}${Math.floor(trailAlpha * 255).toString(16).padStart(2, '0')}`);
+          gradient.addColorStop(1, `${star.relic.auraColor}00`);
+
+          ctx.value!.beginPath();
+          ctx.value!.arc(trailPoint.x, trailPoint.y, trailSize, 0, Math.PI * 2);
+          ctx.value!.fillStyle = gradient;
+          ctx.value!.fill();
+        }
+        ctx.value!.restore();
+      }
+
+      // Draw relic star glow/aura
+      const glowRadius = star.size * (2 + star.glowIntensity);
+      const auraGradient = ctx.value!.createRadialGradient(
+        star.x, star.y, star.size * 0.5,
+        star.x, star.y, glowRadius
+      );
+      auraGradient.addColorStop(0, `${star.relic.auraColor}80`);
+      auraGradient.addColorStop(0.7, `${star.relic.auraColor}40`);
+      auraGradient.addColorStop(1, `${star.relic.auraColor}00`);
+
+      ctx.value!.beginPath();
+      ctx.value!.arc(star.x, star.y, glowRadius, 0, Math.PI * 2);
+      ctx.value!.fillStyle = auraGradient;
+      ctx.value!.fill();
+
+      // Draw main star body
+      const pulseSize = star.size * (1 + Math.sin(star.pulsePhase) * 0.1);
+
+      // Star shape with multiple points
+      ctx.value!.save();
+      ctx.value!.translate(star.x, star.y);
+      ctx.value!.rotate(star.pulsePhase * 0.3); // Slow rotation
+
+      // Draw star shape
+      const points = 8;
+      const outerRadius = pulseSize;
+      const innerRadius = pulseSize * 0.5;
+
+      ctx.value!.beginPath();
+      for (let i = 0; i < points * 2; i++) {
+        const angle = (i * Math.PI) / points;
+        const radius = i % 2 === 0 ? outerRadius : innerRadius;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+
+        if (i === 0) {
+          ctx.value!.moveTo(x, y);
+        } else {
+          ctx.value!.lineTo(x, y);
+        }
+      }
+      ctx.value!.closePath();
+
+      // Fill with relic color
+      ctx.value!.fillStyle = star.relic.auraColor;
+      ctx.value!.fill();
+
+      // Add inner highlight
+      ctx.value!.beginPath();
+      for (let i = 0; i < points * 2; i++) {
+        const angle = (i * Math.PI) / points;
+        const radius = (i % 2 === 0 ? outerRadius : innerRadius) * 0.6;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+
+        if (i === 0) {
+          ctx.value!.moveTo(x, y);
+        } else {
+          ctx.value!.lineTo(x, y);
+        }
+      }
+      ctx.value!.closePath();
+      ctx.value!.fillStyle = '#ffffff';
+      ctx.value!.fill();
+
+      ctx.value!.restore();
+
+      // Draw relic icon in center
+      ctx.value!.save();
+      ctx.value!.translate(star.x, star.y);
+      ctx.value!.fillStyle = '#000000';
+      ctx.value!.font = `${star.size * 0.8}px Arial`;
+      ctx.value!.textAlign = 'center';
+      ctx.value!.textBaseline = 'middle';
+      ctx.value!.fillText(star.relic.icon, 0, 0);
+      ctx.value!.restore();
+
+      // Draw word above star with typing highlighting
+      const wordY = star.y - star.size - 20;
+      ctx.value!.save();
+      ctx.value!.font = `bold ${16}px Arial`;
+      ctx.value!.textAlign = 'center';
+      ctx.value!.textBaseline = 'middle';
+
+      // If star has typing progress, draw highlighted text
+      if (star.typedProgress > 0) {
+        // Calculate the number of characters typed based on progress
+        const typedLength = Math.floor(star.typedProgress * star.word.length);
+        const typedPortion = star.word.substring(0, typedLength);
+        const remainingPortion = star.word.substring(typedLength);
+
+        // Measure text to position the parts correctly
+        const typedWidth = ctx.value!.measureText(typedPortion).width;
+        const totalWidth = ctx.value!.measureText(star.word).width;
+        const remainingWidth = ctx.value!.measureText(remainingPortion).width;
+
+        // Calculate positioning for each portion
+        const startX = star.x - totalWidth / 2;
+
+        // Draw background stroke for both portions
+        ctx.value!.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.value!.lineWidth = 3;
+        ctx.value!.strokeText(star.word, star.x, wordY);
+
+        // Draw typed portion with green color and glow
+        ctx.value!.shadowColor = '#00ff00';
+        ctx.value!.shadowBlur = 12;
+        ctx.value!.fillStyle = '#00ff00'; // Bright green
+        ctx.value!.textAlign = 'left';
+        ctx.value!.fillText(typedPortion, startX, wordY);
+
+        // Reset shadow and draw remaining portion (white)
+        ctx.value!.shadowBlur = 0;
+        ctx.value!.shadowColor = 'transparent';
+        ctx.value!.fillStyle = '#ffffff';
+        ctx.value!.fillText(remainingPortion, startX + typedWidth, wordY);
+
+        // Reset text alignment
+        ctx.value!.textAlign = 'center';
+      } else {
+        // Draw normal text with stroke
+        ctx.value!.strokeStyle = '#000000';
+        ctx.value!.lineWidth = 2;
+        ctx.value!.strokeText(star.word, star.x, wordY);
+        
+        ctx.value!.fillStyle = isHighlighted ? '#ffff00' : '#ffffff';
+        ctx.value!.fillText(star.word, star.x, wordY);
+      }
+      
+      ctx.value!.restore();
+
+      // Draw time remaining indicator
+      const timeProgress = star.timeRemaining / star.maxTime;
+      const barWidth = star.size * 2;
+      const barHeight = 4;
+      const barY = star.y + star.size + 15;
+
+      // Background bar
+      ctx.value!.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.value!.fillRect(star.x - barWidth / 2, barY, barWidth, barHeight);
+
+      // Progress bar
+      const progressWidth = barWidth * timeProgress;
+      let barColor = '#00ff00'; // Green
+      if (timeProgress < 0.5) barColor = '#ffff00'; // Yellow
+      if (timeProgress < 0.25) barColor = '#ff0000'; // Red
+
+      ctx.value!.fillStyle = barColor;
+      ctx.value!.fillRect(star.x - barWidth / 2, barY, progressWidth, barHeight);
+
+      // Draw rarity indicator
+      let rarityColor = '#ffffff';
+      let rarityText = '';
+      switch (star.relic.rarity) {
+        case 'common':
+          rarityColor = '#ffffff';
+          rarityText = '●';
+          break;
+        case 'rare':
+          rarityColor = '#0088ff';
+          rarityText = '◆';
+          break;
+        case 'epic':
+          rarityColor = '#aa00ff';
+          rarityText = '★';
+          break;
+        case 'legendary':
+          rarityColor = '#ffaa00';
+          rarityText = '✦';
+          break;
+      }
+
+      ctx.value!.save();
+      ctx.value!.fillStyle = rarityColor;
+      ctx.value!.font = 'bold 12px Arial';
+      ctx.value!.textAlign = 'center';
+      ctx.value!.textBaseline = 'middle';
+      ctx.value!.fillText(rarityText, star.x + star.size + 10, star.y - star.size - 10);
+      ctx.value!.restore();
+
+      // Draw highlight effect if selected
+      if (isHighlighted) {
+        ctx.value!.save();
+        ctx.value!.strokeStyle = '#ffff00';
+        ctx.value!.lineWidth = 3;
+        ctx.value!.setLineDash([5, 5]);
+        ctx.value!.lineDashOffset = -Date.now() * 0.01; // Animated dashes
+        ctx.value!.beginPath();
+        ctx.value!.arc(star.x, star.y, star.size + 10, 0, Math.PI * 2);
+        ctx.value!.stroke();
+        ctx.value!.restore();
+      }
+    });
   };
 
   // Main render function
@@ -306,7 +546,9 @@ export function useGameRenderer(canvasWidth: number, canvasHeight: number) {
     backgroundGradient: BackgroundGradient,
     autoFireTarget: Enemy | null,
     autoFireLaserOpacity: number,
-    deltaTime: number
+    deltaTime: number,
+    highlightedRelicStarId: number | null = null,
+    currentTypedText: string = ''
   ) => {
     if (!ctx.value) return;
 
@@ -322,28 +564,19 @@ export function useGameRenderer(canvasWidth: number, canvasHeight: number) {
       deltaTime
     );
 
-    // Return updated gradient values for the caller to update state
-    const gradientUpdate = {
-      transitionProgress: updatedGradient.transitionProgress,
-      currentIndex: updatedGradient.currentIndex
-    };
-
-    // Draw game objects
+    // Draw game entities
     drawEnemies(gameState.enemies);
     drawProjectiles(projectiles);
     drawPlayerCharacter(gameState.player);
-
-    // Draw auto-fire laser
+    drawRelicStars(gameState.relicStars, highlightedRelicStarId);
     drawAutoFireLaser(gameState.player, autoFireTarget, autoFireLaserOpacity);
-
-    // Draw effects
     drawExplosions(explosions);
     drawDamageNumbers(damageNumbers);
 
-    // Draw UI elements
-    drawWaveIndicator(gameState.wave);
+    // Draw current typed text below the player
+    drawTypedText(gameState.player, currentTypedText);
 
-    return gradientUpdate;
+    return updatedGradient;
   };
 
   return {

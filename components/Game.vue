@@ -10,11 +10,12 @@
 
     <!-- In-game UI Elements -->
     <div v-if="gameState.isPlaying && !gameState.isGameOver" class="game-ui-elements">
-      <!-- HUD with wave and shield -->
+      <!-- HUD with timer and shield -->
       <GameHUD
         :player="gameState.player"
         :gameState="gameState"
         :isPaused="isPaused"
+        :currentTime="currentTime"
         @togglePause="togglePause"
       />
 
@@ -42,15 +43,34 @@
         :availableSkills="availableSkillChoices"
         @confirmLevelUp="handleLevelUpConfirmation"
       />
+
+      <!-- Relic Announcement -->
+      <RelicAnnouncement
+        v-if="announcedRelic"
+        :relic="announcedRelic"
+        @close="closeRelicAnnouncement"
+      />
     </div>
 
-    <!-- Start/Game Over Screen -->
+    <!-- Start Screen -->
     <StartScreen
-      v-if="!gameState.isPlaying || gameState.isGameOver"
-      :isGameOver="gameState.isGameOver"
+      v-if="!gameState.isPlaying && !gameState.isGameOver"
+      :isGameOver="false"
       :wave="gameState.wave"
       :finalScore="gameState.score"
       @startGame="startGame"
+    />
+
+    <!-- Game Over Screen -->
+    <GameOverScreen
+      v-if="gameState.isGameOver"
+      :player="gameState.player"
+      :gameState="gameState"
+      :activeSkills="activeSkills"
+      :gameWon="gameState.gameWon"
+      :survivalTime="currentTime"
+      @restartGame="restartGame"
+      @backToMenu="backToMenu"
     />
   </div>
 </template>
@@ -65,6 +85,8 @@ import StartScreen from './GameUI/StartScreen.vue';
 import PauseScreen from './GameUI/PauseScreen.vue';
 import LevelUpScreen from './GameUI/LevelUpScreen.vue';
 import GameHUD from './GameUI/GameHUD.vue';
+import RelicAnnouncement from './GameUI/RelicAnnouncement.vue';
+import GameOverScreen from './GameUI/GameOverScreen.vue';
 
 // Canvas dimensions
 const canvasWidth = ref(1600);
@@ -81,17 +103,31 @@ const gameRenderer = useGameRenderer(canvasWidth.value, canvasHeight.value);
 const {
   gameState,
   isPaused,
+  isRelicAnnouncementPaused,
   availableSkillChoices,
   currentTypedText,
   wrongTypingEffect,
+  highlightedRelicStarId,
   startGame: engineStartGame,
   restartGame: engineRestartGame,
   togglePause: engineTogglePause,
   updateGame,
   handleKeyPress,
   resetTyping,
-  handleLevelUpConfirmation
+  handleLevelUpConfirmation,
+  announcedRelic,
+  closeRelicAnnouncement,
+  isEffectivelyPaused
 } = gameEngine;
+
+// Timer tracking
+const currentTimestamp = ref(0);
+
+const currentTime = computed(() => {
+  if (gameState.value.startTime === 0) return 0;
+  // Use reactive timestamp instead of Date.now() for reactivity
+  return currentTimestamp.value - gameState.value.startTime;
+});
 
 // Computed properties
 const activeSkills = computed(() => {
@@ -103,13 +139,16 @@ const animationFrameId = ref<number>(0);
 
 // Handle keyboard events
 const handleKeyDown = (event: KeyboardEvent) => {
-  if (gameState.value.isPlaying && !gameState.value.isGameOver && !isPaused.value && !gameState.value.isPausedForLevelUp) {
-    // Handle typing keys
+  if (gameState.value.isPlaying && !gameState.value.isGameOver && !isEffectivelyPaused()) {
+    // Handle typing keys only when not effectively paused
     handleKeyPress(event.key);
   }
 
   if (event.key === 'Escape' && gameState.value.isPlaying && !gameState.value.isGameOver) {
-    togglePause();
+    // Don't allow ESC pause when relic announcement is showing
+    if (!isRelicAnnouncementPaused.value) {
+      togglePause();
+    }
   }
 
   // Handle Enter key to start/play game
@@ -141,6 +180,11 @@ const targetFrameTime = 1000 / targetFPS;
 let lastFrameTime = 0;
 
 const gameLoop = (currentTime: number = performance.now()) => {
+  // Update reactive timestamp for timer ONLY when not effectively paused
+  if (!isEffectivelyPaused()) {
+    currentTimestamp.value = Date.now();
+  }
+  
   // Limit frame rate for better performance
   if (currentTime - lastFrameTime < targetFrameTime) {
     if (gameState.value.isPlaying && !gameState.value.isGameOver) {
@@ -164,7 +208,9 @@ const gameLoop = (currentTime: number = performance.now()) => {
     gameEngine.backgroundGradient.value,
     gameEngine.autoFireTarget.value,
     gameEngine.autoFireLaserOpacity.value,
-    gameEngine.deltaTime.value
+    gameEngine.deltaTime.value,
+    gameEngine.highlightedRelicStarId.value,
+    gameEngine.currentTypedText.value
   );
 
   // Continue the loop if game is still active
@@ -193,6 +239,13 @@ const restartGame = () => {
 
   // Start the game loop
   gameLoop();
+};
+
+// Back to menu
+const backToMenu = () => {
+  // Reset game state to show start screen
+  gameState.value.isPlaying = false;
+  gameState.value.isGameOver = false;
 };
 
 // Initialize canvas when component is mounted

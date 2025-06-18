@@ -15,31 +15,67 @@ export const startWave = (
   canvasHeight: number,
   onCreateExplosion: (x: number, y: number, color: string, radius: number, damage: number) => void,
   onCreateDamageNumber: (x: number, y: number, value: number, color: string, isCritical: boolean, text: string) => void,
-  spawnTimerId: { value: number }
+  spawnTimerId: { value: number },
+  isEffectivelyPaused?: () => boolean
 ): void => {
   const wave = gameState.wave;
   const waveConfig = getWaveConfiguration(wave);
 
-  // Set wave enemy count
+  // Set wave enemy count - for continuous spawning, we'll use this as enemies per minute or similar
   gameState.waveEnemyCount = waveConfig.enemyCount;
   gameState.waveEnemiesDefeated = 0;
+  
+  // Reset pause between waves flag for immediate start
+  gameState.isPausedBetweenWaves = false;
 
   let enemiesSpawned = 0;
 
   // Clear any existing spawn timer
   clearInterval(spawnTimerId.value);
 
-  // Spawn enemies at intervals
+  // Continuous spawning - spawn enemies at regular intervals indefinitely
+  // No more wave countdown, just keep spawning until enemies are defeated
   spawnTimerId.value = window.setInterval(() => {
-    if (enemiesSpawned < waveConfig.enemyCount && !gameState.isGameOver) {
+    // Check if game is paused or over
+    if (gameState.isGameOver || (isEffectivelyPaused && isEffectivelyPaused())) {
+      return; // Don't spawn enemies when paused, but don't clear the timer
+    }
+
+    // For continuous spawning, we can keep spawning enemies
+    // but reduce frequency as more enemies are on screen to avoid overwhelming
+    const activeEnemies = gameState.enemies.length;
+    const maxActiveEnemies = Math.max(8, waveConfig.enemyCount); // At least 8, more for higher waves
+    
+    if (activeEnemies < maxActiveEnemies) {
       spawnEnemy(gameState, canvasWidth, canvasHeight, wave, waveConfig);
       enemiesSpawned++;
     }
-
-    if (enemiesSpawned >= waveConfig.enemyCount) {
-      clearInterval(spawnTimerId.value);
-    }
   }, waveConfig.spawnInterval);
+};
+
+/**
+ * Pause or resume enemy spawning
+ */
+export const pauseEnemySpawning = (spawnTimerId: { value: number }): void => {
+  clearInterval(spawnTimerId.value);
+};
+
+/**
+ * Resume enemy spawning with saved state
+ */
+export const resumeEnemySpawning = (
+  gameState: GameState,
+  canvasWidth: number,
+  canvasHeight: number,
+  onCreateExplosion: (x: number, y: number, color: string, radius: number, damage: number) => void,
+  onCreateDamageNumber: (x: number, y: number, value: number, color: string, isCritical: boolean, text: string) => void,
+  spawnTimerId: { value: number },
+  isEffectivelyPaused?: () => boolean
+): void => {
+  // Resume spawning with current wave configuration
+  if (!gameState.isGameOver && gameState.isPlaying) {
+    startWave(gameState, canvasWidth, canvasHeight, onCreateExplosion, onCreateDamageNumber, spawnTimerId, isEffectivelyPaused);
+  }
 };
 
 // Helper function to spawn an enemy
@@ -94,7 +130,12 @@ const spawnEnemy = (
   // Generate enemy
   const word = getRandomWord();
   const color = isElite ? '#9c27b0' : isBoss ? '#f44336' : '#ff9800';
-  const speed = isBoss ? 15 : isElite ? 25 : 30;
+  let speed = isBoss ? 15 : isElite ? 25 : 30;
+
+  // Apply Time Distortion effect if player has it
+  if (gameState.player.hasTimeDistortion) {
+    speed *= 0.7; // Reduce speed by 30%
+  }
 
   const enemy = createEnemy(
     Date.now() + Math.random(),
@@ -143,7 +184,8 @@ export const selectSkill = (
   canvasHeight: number,
   onEnemySpawned: () => void,
   onWaveComplete: () => void,
-  spawnTimerId: { value: number }
+  spawnTimerId: { value: number },
+  isEffectivelyPaused?: () => boolean
 ): void => {
   // Find the actual skill in the game state and level it up
   const gameStateSkill = gameState.availableSkills.find(s => s.id === skill.id);
@@ -159,7 +201,8 @@ export const selectSkill = (
     canvasHeight,
     onEnemySpawned,
     onWaveComplete,
-    spawnTimerId
+    spawnTimerId,
+    isEffectivelyPaused
   );
 };
 
@@ -240,6 +283,9 @@ export const applyDamageToEnemy = (
 
     // Update score - add the enemy's point value to the total score
     gameState.score += enemy.pointValue;
+
+    // Track enemies killed
+    gameState.enemiesKilled++;
 
     // Check for level up
     if (gameState.player.xp >= gameState.player.xpToNextLevel) {

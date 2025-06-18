@@ -62,6 +62,9 @@ export interface DamageNumber {
   progress: number;
   isCritical: boolean;
   text?: string; // Optional text to display instead of value
+  initialY: number;
+  velocity: number;
+  alpha: number;
 }
 
 /**
@@ -95,7 +98,8 @@ export const createExplosion = (
   radius: number = 30,
   damage: number = 0,
   enemies: Enemy[] = [],
-  onDamageEnemy: (enemy: Enemy, damage: number, isCritical: boolean) => void
+  onDamageEnemy: (enemy: Enemy, damage: number, isCritical: boolean) => void,
+  player?: any // Optional player parameter to check for Nova Core
 ): Explosion => {
   const particleCount = 8;
   const particles = [];
@@ -116,6 +120,12 @@ export const createExplosion = (
 
   // Apply damage to nearby enemies if this explosion deals damage
   if (damage > 0 && enemies.length > 0) {
+    // Apply Nova Core effect if player has it
+    let actualExplosionDamage = damage;
+    if (player && player.hasNovaCore) {
+      actualExplosionDamage *= 2; // Double explosion damage
+    }
+
     for (const enemy of enemies) {
       const dx = enemy.x - x;
       const dy = enemy.y - y;
@@ -124,9 +134,9 @@ export const createExplosion = (
       if (distance <= radius) {
         // Calculate damage with distance falloff
         const damageMultiplier = 1 - (distance / radius);
-        const actualDamage = damage * damageMultiplier;
+        const finalDamage = actualExplosionDamage * damageMultiplier;
 
-        onDamageEnemy(enemy, actualDamage, false);
+        onDamageEnemy(enemy, finalDamage, false);
       }
     }
   }
@@ -143,7 +153,7 @@ export const createExplosion = (
 };
 
 /**
- * Create a damage number floating text
+ * Create a damage number
  */
 export const createDamageNumber = (
   x: number,
@@ -156,11 +166,14 @@ export const createDamageNumber = (
   return {
     x,
     y,
-    value,
+    value: Math.round(value), // Ensure damage is always an integer
     color,
-    progress: 0,
     isCritical,
-    text
+    text,
+    progress: 0,
+    initialY: y,
+    velocity: -2,
+    alpha: 1
   };
 };
 
