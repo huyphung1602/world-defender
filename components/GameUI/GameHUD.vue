@@ -1,23 +1,18 @@
 <template>
   <div class="game-hud">
-    <div class="hud-item">Level: {{ player.level }}</div>
-    <div class="hud-item">Score: {{ gameState.score.toLocaleString() }}</div>
-    <div class="hud-item shield">
-      <div class="shield-bar">
-        <div class="shield-fill" :style="{width: `${(player.shield / player.maxShield) * 100}%`}"></div>
-      </div>
-      <span>Shield: {{ Math.floor(player.shield) }}/{{ player.maxShield }}</span>
-    </div>
-    <div class="hud-item">
+    <!-- Full-width XP bar at top -->
+    <div class="xp-container">
       <div class="xp-bar">
         <div class="xp-fill" :style="{width: `${(player.xp / player.xpToNextLevel) * 100}%`}"></div>
+        <div class="xp-text">
+          Level {{ player.level }} • {{ player.xp }}/{{ player.xpToNextLevel }} XP
+        </div>
       </div>
-      <span>XP: {{ player.xp }}/{{ player.xpToNextLevel }}</span>
     </div>
-    <div class="hud-item">
-      <button @click="$emit('togglePause')" class="pause-button">
-        {{ isPaused ? 'Resume' : 'Pause (ESC)' }}
-      </button>
+
+    <!-- Score at top-right beside the bar -->
+    <div class="score-display">
+      {{ gameState.score.toLocaleString() }}
     </div>
   </div>
 </template>
@@ -40,64 +35,76 @@ defineEmits<{
 
 <style scoped>
 .game-hud {
-  display: flex;
-  flex-direction: column;
   position: absolute;
-  top: 10px;
-  left: 10px;
-  background-color: rgba(0, 0, 0, 0.7);
-  border-radius: 10px;
-  padding: 10px;
-  color: white;
-  font-size: 16px;
-  font-weight: bold;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
   z-index: 30;
-  pointer-events: auto;
 }
 
-.hud-item {
-  margin-bottom: 5px;
+/* Full-width XP bar at top */
+.xp-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 120px; /* Leave space for score */
+  height: 50px;
+  pointer-events: none;
+}
+
+.xp-bar {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.4));
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
   display: flex;
   align-items: center;
-}
-
-.shield-bar, .xp-bar {
-  width: 150px;
-  height: 10px;
-  background-color: rgba(255, 255, 255, 0.2);
-  border-radius: 5px;
-  margin-right: 10px;
-  overflow: hidden;
-}
-
-.shield-fill {
-  height: 100%;
-  background-color: #3498db;
-  border-radius: 5px;
-  transition: width 0.3s ease;
+  justify-content: center;
 }
 
 .xp-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
   height: 100%;
-  background-color: #2ecc71;
-  border-radius: 5px;
-  transition: width 0.3s ease;
+  background: linear-gradient(135deg, #2ecc71, #27ae60, #1abc9c);
+  transition: width 0.5s ease;
+  box-shadow: inset 0 2px 10px rgba(255, 255, 255, 0.2);
 }
 
-.pause-button {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 25px;
+.xp-text {
+  position: relative;
+  z-index: 2;
+  color: #ffffff;
   font-size: 16px;
   font-weight: bold;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background-color: #3498db;
-  color: white;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+  font-family: 'Arial', sans-serif;
+  pointer-events: none;
 }
 
-.pause-button:hover {
-  background-color: #2980b9;
-  transform: scale(1.05);
+/* Score at top-right */
+.score-display {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 120px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.5));
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+  font-family: 'Arial', sans-serif;
+  pointer-events: none;
 }
 </style> 
