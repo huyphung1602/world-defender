@@ -1,8 +1,8 @@
 <template>
   <div class="pause-screen-overlay">
-    <div class="pause-content">
+    <div class="pause-content custom-scrollbar-modal">
       <h2>Game Paused</h2>
-      <p>Press the Resume button or ESC key to continue</p>
+      <p>Press the Resume button or <KeyPrompt>ESC</KeyPrompt> key to continue</p>
 
       <div class="controls-info">
         <p>Controls:</p>
@@ -23,7 +23,7 @@
             <p>No relics collected yet.</p>
             <p>Look for flying ⭐ stars and type their words!</p>
           </div>
-          <div v-else class="relics-grid">
+          <div v-else class="relics-grid custom-scrollbar-gold">
             <div
               v-for="relic in player.relics"
               :key="relic.id"
@@ -104,7 +104,7 @@
       </div>
 
       <div class="button-container">
-        <button @click="$emit('togglePause')" class="resume-button">Resume Game</button>
+        <button @click="$emit('togglePause')" class="resume-button">Resume Game <KeyPrompt>ESC</KeyPrompt></button>
         <button @click="$emit('restartGame')" class="restart-button">Restart Run</button>
       </div>
     </div>
@@ -122,6 +122,7 @@
 import { ref } from 'vue';
 import type { Player, Skill, GameState, Relic } from '../../utils/gameModels';
 import RelicTooltip from './RelicTooltip.vue';
+import KeyPrompt from '../UI/KeyPrompt.vue';
 
 interface Props {
   player: Player;
@@ -447,14 +448,8 @@ const getSkillDescription = (skill: Skill) => {
   grid-template-columns: repeat(5, 1fr);
   gap: 10px;
   overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
   padding: 10px;
   overflow-x: visible;
-}
-
-.relics-grid::-webkit-scrollbar {
-  display: none;
 }
 
 .relic-item {

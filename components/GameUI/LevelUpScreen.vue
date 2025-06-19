@@ -2,16 +2,18 @@
   <div class="level-up-overlay">
     <div class="level-up-content">
       <h2>Level {{ playerLevel }} Reached!</h2>
-      <p>Choose an upgrade to continue:</p>
+      <p>Choose an upgrade (Press <KeyPrompt>1</KeyPrompt>-<KeyPrompt>{{ availableSkills.length }}</KeyPrompt> or click):</p>
 
       <div class="skill-selection">
         <div
-          v-for="skill in availableSkills"
+          v-for="(skill, index) in availableSkills"
           :key="skill.id"
           class="skill-option"
           @click="selectSkill(skill)"
-          :class="{ 'selected': selectedSkill && selectedSkill.id === skill.id }"
         >
+          <div class="key-indicator">
+            <span class="key-number">{{ index + 1 }}</span>
+          </div>
           <div class="skill-icon">{{ skill.icon }}</div>
           <div class="skill-details">
             <h3>{{ skill.name }} (Level {{ skill.level + 1 }})</h3>
@@ -19,46 +21,51 @@
           </div>
         </div>
       </div>
-
-      <div class="level-up-confirmation">
-        <button
-          class="confirm-button"
-          @click="confirmSelection"
-          :disabled="!selectedSkill"
-        >
-          Continue
-        </button>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, onUnmounted } from 'vue';
 import type { Skill } from '../../utils/gameModels';
+import KeyPrompt from '../UI/KeyPrompt.vue';
 
 interface Props {
   playerLevel: number;
   availableSkills: Skill[];
 }
 
-defineProps<Props>();
-
-const selectedSkill = ref<Skill | null>(null);
+const props = defineProps<Props>();
 
 const emit = defineEmits<{
   confirmLevelUp: [skill: Skill]
 }>();
 
 const selectSkill = (skill: Skill) => {
-  selectedSkill.value = skill;
+  // Immediately confirm the selection without requiring a continue button
+  emit('confirmLevelUp', skill);
 };
 
-const confirmSelection = () => {
-  if (selectedSkill.value) {
-    emit('confirmLevelUp', selectedSkill.value);
+// Handle keyboard events for direct skill selection
+const handleKeyDown = (event: KeyboardEvent) => {
+  const keyNumber = parseInt(event.key);
+
+  // Check if the key is a number from 1 to the number of available skills
+  if (keyNumber >= 1 && keyNumber <= props.availableSkills.length) {
+    const selectedSkill = props.availableSkills[keyNumber - 1];
+    selectSkill(selectedSkill);
   }
 };
+
+// Add keyboard listener when component mounts
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown);
+});
+
+// Remove keyboard listener when component unmounts
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
+});
 </script>
 
 <style scoped>
@@ -115,6 +122,7 @@ const confirmSelection = () => {
   transition: all 0.2s ease;
   width: 100%;
   align-items: center;
+  position: relative;
 }
 
 .skill-option:hover {
@@ -122,10 +130,41 @@ const confirmSelection = () => {
   transform: scale(1.02);
 }
 
-.skill-option.selected {
-  background-color: rgba(46, 204, 113, 0.3);
-  border-color: rgba(46, 204, 113, 0.8);
-  box-shadow: 0 0 15px rgba(46, 204, 113, 0.5);
+.key-indicator {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: linear-gradient(145deg, #f0f0f0, #d0d0d0);
+  color: #333;
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.4),
+    inset 0 1px 2px rgba(255, 255, 255, 0.8),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.2);
+  border: 1px solid #bbb;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.key-number {
+  font-size: 14px;
+  font-weight: bold;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.8);
+}
+
+.skill-option:hover .key-indicator {
+  background: linear-gradient(145deg, #fff, #e0e0e0);
+  transform: translateY(-1px);
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.5),
+    inset 0 1px 2px rgba(255, 255, 255, 0.9),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .skill-icon {
@@ -149,34 +188,5 @@ const confirmSelection = () => {
   font-size: 14px;
   opacity: 0.8;
   color: #cccccc;
-}
-
-.level-up-confirmation {
-  margin-top: 20px;
-  padding-top: 15px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.confirm-button {
-  padding: 12px 25px;
-  font-size: 18px;
-  background-color: #2ecc71;
-  color: white;
-  border: none;
-  border-radius: 25px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.confirm-button:hover:not(:disabled) {
-  background-color: #27ae60;
-  transform: scale(1.05);
-}
-
-.confirm-button:disabled {
-  background-color: #95a5a6;
-  cursor: not-allowed;
-  transform: none;
 }
 </style>

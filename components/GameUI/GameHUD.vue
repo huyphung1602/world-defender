@@ -23,12 +23,21 @@
     <div class="score-display">
       {{ gameState.score.toLocaleString() }}
     </div>
+
+    <!-- ESC pause instruction at bottom-right -->
+    <div class="pause-instruction flex flex-col gap-2 items-center justify-center h-full">
+      <div>
+        Press <KeyPrompt>ESC</KeyPrompt> to pause
+      </div>
+      <div>Press <KeyPrompt>⏎</KeyPrompt> to clean the text</div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { Player, GameState } from '../../utils/gameModels';
+import KeyPrompt from '../UI/KeyPrompt.vue';
 
 interface Props {
   player: Player;
@@ -183,4 +192,22 @@ const timeProgressPercent = computed(() => {
   font-family: 'Arial', sans-serif;
   pointer-events: none;
 }
-</style> 
+
+/* ESC pause instruction at bottom-right */
+.pause-instruction {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  padding: 8px;
+  background: transparent;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+  font-family: 'Arial', sans-serif;
+  pointer-events: none;
+}
+</style>

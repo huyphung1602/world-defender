@@ -1,6 +1,6 @@
 <template>
   <div class="game-over-overlay">
-    <div class="game-over-content">
+    <div class="game-over-content custom-scrollbar-modal">
       <!-- Victory/Defeat Header -->
       <div class="game-over-header" :class="{ victory: gameWon, defeat: !gameWon }">
         <h1 v-if="gameWon">🏆 VICTORY! 🏆</h1>
@@ -56,7 +56,7 @@
           <div v-if="player.relics.length === 0" class="no-items">
             <p>No relics were collected this run.</p>
           </div>
-          <div v-else class="relics-grid">
+          <div v-else class="relics-grid custom-scrollbar-gold">
             <div
               v-for="relic in player.relics"
               :key="relic.id"
@@ -82,7 +82,7 @@
         <div v-if="activeSkills.length === 0" class="no-items">
           <p>No skills were learned this run.</p>
         </div>
-        <div v-else class="skills-grid">
+        <div v-else class="skills-grid custom-scrollbar-purple">
           <div v-for="skill in activeSkills" :key="skill.id" class="skill-item">
             <div class="skill-icon">{{ skill.icon }}</div>
             <div class="skill-info">
@@ -96,10 +96,10 @@
       <!-- Action Buttons -->
       <div class="button-container">
         <button @click="$emit('restartGame')" class="play-again-button">
-          🔄 Play Again
+          🔄 Play Again <KeyPrompt>Enter</KeyPrompt>
         </button>
         <button @click="$emit('backToMenu')" class="menu-button">
-          🏠 Main Menu
+          🏠 Main Menu <KeyPrompt>ESC</KeyPrompt>
         </button>
       </div>
     </div>
@@ -114,9 +114,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import type { Player, Skill, GameState, Relic } from '../../utils/gameModels';
 import RelicTooltip from './RelicTooltip.vue';
+import KeyPrompt from '../UI/KeyPrompt.vue';
 
 interface Props {
   player: Player;
@@ -128,7 +129,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
-defineEmits<{
+const emit = defineEmits<{
   restartGame: [];
   backToMenu: [];
 }>();
@@ -168,6 +169,25 @@ const formattedSurvivalTime = computed(() => {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+});
+
+// Keyboard event handler
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (event.key === 'Enter') {
+    emit('restartGame');
+  } else if (event.key === 'Escape') {
+    emit('backToMenu');
+  }
+};
+
+// Add keyboard listener when component mounts
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown);
+});
+
+// Remove keyboard listener when component unmounts
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
 });
 </script>
 
@@ -326,12 +346,6 @@ const formattedSurvivalTime = computed(() => {
   grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   gap: 12px;
   overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.relics-grid::-webkit-scrollbar {
-  display: none;
 }
 
 .relic-item {
@@ -410,12 +424,6 @@ const formattedSurvivalTime = computed(() => {
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 15px;
   overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.skills-grid::-webkit-scrollbar {
-  display: none;
 }
 
 .skill-item {

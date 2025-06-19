@@ -26,7 +26,7 @@
 
       <div class="modal-actions">
         <button @click="closeModal" class="continue-button">
-          Continue Fighting! (Enter/Esc)
+          Continue Fighting! <KeyPrompt>⏎</KeyPrompt>/<KeyPrompt>ESC</KeyPrompt>
         </button>
       </div>
 
@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue';
 import type { Relic } from '../../utils/gameModels';
+import KeyPrompt from '../UI/KeyPrompt.vue';
 
 interface Props {
   relic: Relic | null;

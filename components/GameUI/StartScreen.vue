@@ -27,13 +27,15 @@
       </div>
 
       <button class="start-button" @click="$emit('startGame')">
-        {{ isGameOver ? 'Play Again' : 'Start Game' }}
+        {{ isGameOver ? 'Play Again' : 'Start Game' }} <KeyPrompt>Enter</KeyPrompt>
       </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import KeyPrompt from '../UI/KeyPrompt.vue';
+
 interface Props {
   isGameOver: boolean;
   wave: number;
