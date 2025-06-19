@@ -593,7 +593,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       // Add slight delay between shots for visual effect (only if multiple shots)
       const delay = tripleShot ? shotIndex * 50 : 0;
       setTimeout(() => {
-        fireProjectile(enemy, damage, isCritical, shotIndex > 0, true);
+        // Only the first shot (shotIndex 0) should be a main shot that can change enemy words
+        // Additional shots are multi-shots and should not change words to avoid confusing the player
+        fireProjectile(enemy, damage, isCritical, shotIndex > 0, shotIndex === 0);
       }, delay);
     }
   };

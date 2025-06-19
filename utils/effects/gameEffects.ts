@@ -227,7 +227,7 @@ export const createProjectile = (
  */
 export const initializeStars = (count: number, canvasWidth: number, canvasHeight: number): Star[] => {
   const stars: Star[] = [];
-  
+
   for (let i = 0; i < count; i++) {
     stars.push({
       x: Math.random() * canvasWidth,
@@ -237,7 +237,7 @@ export const initializeStars = (count: number, canvasWidth: number, canvasHeight
       opacity: Math.random() * 0.8 + 0.2
     });
   }
-  
+
   return stars;
 };
 
@@ -270,9 +270,9 @@ export const updateExplosions = (explosions: Explosion[], deltaTime: number): vo
         particle.x += particle.vx * deltaTime * 60;
         particle.y += particle.vy * deltaTime * 60;
         particle.size *= 0.95; // Shrink particles over time
-        
+
         // Remove particles that are too small or far from explosion center
-        if (particle.size < 0.5 || 
+        if (particle.size < 0.5 ||
             Math.abs(particle.x - explosion.x) > explosion.maxRadius * 2 ||
             Math.abs(particle.y - explosion.y) > explosion.maxRadius * 2) {
           explosion.particles.splice(j, 1);
@@ -302,7 +302,7 @@ export const updateDamageNumbers = (damageNumbers: DamageNumber[], deltaTime: nu
  * Update projectiles based on delta time
  */
 export const updateProjectiles = (
-  projectiles: Projectile[], 
+  projectiles: Projectile[],
   deltaTime: number,
   enemies: any[], // Using any to avoid circular dependencies
   onHitEnemy: (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean, isMainShot: boolean) => void,
@@ -310,49 +310,49 @@ export const updateProjectiles = (
 ): void => {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const projectile = projectiles[i];
-    
+
     // Skip if already hit and no bounces left
     if (projectile.hasHit && projectile.bouncesLeft <= 0) {
       projectiles.splice(i, 1);
       continue;
     }
-    
+
     // Update progress
     const oldProgress = projectile.progress;
     projectile.progress += projectile.speed * deltaTime;
-    
+
     // Calculate previous and current position
     const prevX = projectile.x;
     const prevY = projectile.y;
-    
+
     // Update position
     projectile.x = projectile.x + (projectile.targetX - projectile.x) * (projectile.progress - oldProgress) / (1 - oldProgress);
     projectile.y = projectile.y + (projectile.targetY - projectile.y) * (projectile.progress - oldProgress) / (1 - oldProgress);
-    
+
     // Check for collision with enemies
     if (!projectile.hasHit && enemies.length > 0) {
       // Find the enemy closest to the player along the projectile's path
       let closestEnemy = null;
       let closestDistance = Infinity;
-      
+
       for (const enemy of enemies) {
         // Skip enemies we've already hit with this projectile
         if (projectile.hitEnemyIds.includes(enemy.id)) {
           continue;
         }
-        
+
         // Calculate distance between projectile and enemy
         const dx = projectile.x - enemy.x;
         const dy = projectile.y - enemy.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        
+
         // Check if projectile hit enemy hitbox
         if (distance <= enemy.radius + projectile.size) {
           // Calculate distance from player to enemy (to find the closest one)
           const playerToEnemyDx = enemy.x - (projectile.x - (projectile.targetX - projectile.x) * projectile.progress);
           const playerToEnemyDy = enemy.y - (projectile.y - (projectile.targetY - projectile.y) * projectile.progress);
           const playerToEnemyDistance = Math.sqrt(playerToEnemyDx * playerToEnemyDx + playerToEnemyDy * playerToEnemyDy);
-          
+
           // Keep track of the closest enemy
           if (playerToEnemyDistance < closestDistance) {
             closestDistance = playerToEnemyDistance;
@@ -360,25 +360,25 @@ export const updateProjectiles = (
           }
         }
       }
-      
+
       // If we found an enemy to hit, apply damage to it
       if (closestEnemy) {
         // Mark as hit
         projectile.hasHit = true;
-        
+
         // Add this enemy to the list of hit enemies
         projectile.hitEnemyIds.push(closestEnemy.id);
-        
+
         // Apply damage to enemy
         onHitEnemy(
-          closestEnemy.id, 
-          projectile.damage, 
+          closestEnemy.id,
+          projectile.damage,
           projectile.isCritical,
           projectile.isMultiShot,
           projectile.isDoubleShot,
           projectile.isMainShot
         );
-        
+
         // Create AOE explosion if needed
         if (projectile.aoeRadius > 0) {
           // Create visual explosion for AOE
@@ -389,7 +389,7 @@ export const updateProjectiles = (
             projectile.aoeRadius,
             projectile.damage * 0.5
           );
-          
+
           // Apply AOE damage to nearby enemies
           createAOEExplosion(
             closestEnemy.x,
@@ -405,14 +405,14 @@ export const updateProjectiles = (
             }
           );
         }
-        
+
         // Check if we have bounces left
         if (projectile.bouncesLeft > 0) {
           // Check if the bounce occurs based on bounce chance
           if (Math.random() < projectile.bounceChance) {
             // Find a new target for the bounce
             const potentialTargets = enemies.filter(e => !projectile.hitEnemyIds.includes(e.id));
-            
+
             if (potentialTargets.length > 0) {
               // Find the closest enemy that hasn't been hit
               const nextTarget = potentialTargets.sort((a, b) => {
@@ -420,11 +420,11 @@ export const updateProjectiles = (
                 const distB = Math.sqrt(Math.pow(b.x - closestEnemy.x, 2) + Math.pow(b.y - closestEnemy.y, 2));
                 return distA - distB;
               })[0];
-              
+
               // Save the bounce position for trail rendering
               projectile.lastBounceX = closestEnemy.x;
               projectile.lastBounceY = closestEnemy.y;
-              
+
               // Reset projectile for bounce
               projectile.hasHit = false;
               projectile.progress = 0;
@@ -435,7 +435,10 @@ export const updateProjectiles = (
               projectile.targetEnemyId = nextTarget.id;
               projectile.damage = projectile.damage * 0.8; // Reduce damage for bounces
               projectile.bouncesLeft--;
-              
+
+              // Bounced bullets are no longer main shots to prevent changing enemy words during typing
+              projectile.isMainShot = false;
+
               // Create a visual effect for the bounce
               onCreateExplosion(
                 closestEnemy.x,
@@ -452,7 +455,7 @@ export const updateProjectiles = (
         }
       }
     }
-    
+
     // Remove projectile if it reached its target or went beyond
     if (projectile.progress >= 1) {
       if (projectile.bouncesLeft > 0) {
@@ -460,15 +463,15 @@ export const updateProjectiles = (
         if (Math.random() < projectile.bounceChance) {
           // Try to find a new target for the bounce
           const potentialTargets = enemies.filter(e => !projectile.hitEnemyIds.includes(e.id));
-          
+
           if (potentialTargets.length > 0) {
             // Find a random enemy that hasn't been hit
             const nextTarget = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
-            
+
             // Save the bounce position for trail rendering
             projectile.lastBounceX = projectile.targetX;
             projectile.lastBounceY = projectile.targetY;
-            
+
             // Reset projectile for bounce
             projectile.hasHit = false;
             projectile.progress = 0;
@@ -479,7 +482,10 @@ export const updateProjectiles = (
             projectile.targetEnemyId = nextTarget.id;
             projectile.damage = projectile.damage * 0.8; // Reduce damage for bounces
             projectile.bouncesLeft--;
-            
+
+            // Bounced bullets are no longer main shots to prevent changing enemy words during typing
+            projectile.isMainShot = false;
+
             // Create a visual effect for the bounce
             onCreateExplosion(
               projectile.x,
@@ -519,15 +525,15 @@ export const createAOEExplosion = (
     const dx = x - enemy.x;
     const dy = y - enemy.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    
+
     // Check if enemy is within AOE radius
     if (distance <= radius + enemy.radius) {
       // Apply damage to enemy - damage falls off with distance
       const damageMultiplier = 1 - (distance / (radius + enemy.radius));
       const actualDamage = damage * Math.max(0.2, damageMultiplier); // Minimum 20% damage
-      
+
       // Apply damage to enemy
       onHitEnemy(enemy.id, actualDamage, false);
     }
   }
-}; 
+};
