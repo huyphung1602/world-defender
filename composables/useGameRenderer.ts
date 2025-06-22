@@ -101,114 +101,391 @@ export function useGameRenderer(canvasWidth: number, canvasHeight: number) {
     if (!ctx.value) return;
 
     projectiles.forEach(projectile => {
-      // Calculate projectile direction for flame tail
+      // Calculate projectile direction
       const angle = Math.atan2(projectile.targetY - projectile.y, projectile.targetX - projectile.x);
 
-      // Flame colors based on projectile type
-      let flameColors;
-      let trailLength;
-      if (projectile.isFrozenBullet) {
-        flameColors = ['#e6f3ff', '#b3d9ff', '#80bfff', '#4da6ff']; // Ice blue shades
-        trailLength = projectile.size * 8;
-      } else if (projectile.isCritical) {
-        flameColors = ['#ffcccc', '#ff9999', '#ff6666', '#ff3333', '#ff0000', '#cc0000']; // Red flame
-        trailLength = projectile.size * 12; // Longer for critical
+      // Different rendering based on projectile type
+      if (projectile.projectileType === 'bouncing') {
+        // Sphere/ball shape for bouncing shots - looks like it should bounce
+        drawSphereProjectile(projectile, angle);
+      } else if (projectile.projectileType === 'multishot') {
+        // Crescent shape for multi-shot
+        drawCrescentProjectile(projectile, angle);
+      } else if (projectile.projectileType === 'ice') {
+        // Ice arrow projectile (Arctic Barrage skill)
+        drawIceArrow(projectile, angle);
+      } else if (projectile.projectileType === 'fire') {
+        // Fire meteor projectile (Meteor Storm skill)
+        drawFireMeteor(projectile, angle);
       } else {
-        flameColors = ['#fff5cc', '#ffe066', '#ffcc00', '#ff9900', '#ff6600']; // Yellow flame
-        trailLength = projectile.size * 10;
-      }
-
-      // Draw flame tail with gradient effect
-      const numFlameSegments = flameColors.length;
-      for (let i = 0; i < numFlameSegments; i++) {
-        const segmentProgress = i / (numFlameSegments - 1);
-        const segmentDistance = trailLength * segmentProgress;
-
-        // Calculate flame segment position
-        const segmentX = projectile.x - Math.cos(angle) * segmentDistance;
-        const segmentY = projectile.y - Math.sin(angle) * segmentDistance;
-
-        // Create flame shape - wider at base, tapering to point
-        const baseWidth = projectile.size * (2.5 - segmentProgress * 1.5);
-        const segmentHeight = projectile.size * (1.8 - segmentProgress * 0.8);
-
-        // Draw flame segment as an elongated oval
-        ctx.value!.save();
-        ctx.value!.translate(segmentX, segmentY);
-        ctx.value!.rotate(angle);
-
-        // Create flame-like shape
-        ctx.value!.beginPath();
-        ctx.value!.ellipse(0, 0, segmentHeight, baseWidth, 0, 0, Math.PI * 2);
-
-        // Apply flame color with transparency based on position
-        const alpha = (1 - segmentProgress * 0.7) * 0.8;
-        const color = flameColors[i];
-        ctx.value!.fillStyle = color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
-        ctx.value!.fill();
-
-        // Add inner glow for flame effect
-        if (i < 3) { // Only for the front segments
-          ctx.value!.beginPath();
-          ctx.value!.ellipse(0, 0, segmentHeight * 0.6, baseWidth * 0.6, 0, 0, Math.PI * 2);
-          const innerAlpha = (1 - segmentProgress * 0.5) * 0.9;
-          const innerColor = i === 0 ? '#ffffff' : flameColors[Math.max(0, i - 1)];
-          ctx.value!.fillStyle = innerColor + Math.floor(innerAlpha * 255).toString(16).padStart(2, '0');
-          ctx.value!.fill();
-        }
-
-        ctx.value!.restore();
-      }
-
-      // Draw projectile core (flame head)
-      const coreColor = projectile.isFrozenBullet ? '#ffffff' :
-                       projectile.isCritical ? '#ffcccc' : '#ffffcc';
-
-      ctx.value!.save();
-      ctx.value!.translate(projectile.x, projectile.y);
-      ctx.value!.rotate(angle);
-
-      // Draw flame head shape
-      ctx.value!.beginPath();
-      ctx.value!.ellipse(0, 0, projectile.size * 1.5, projectile.size * 1.2, 0, 0, Math.PI * 2);
-      ctx.value!.fillStyle = coreColor;
-      ctx.value!.fill();
-
-      // Add bright core
-      ctx.value!.beginPath();
-      ctx.value!.ellipse(0, 0, projectile.size * 0.8, projectile.size * 0.6, 0, 0, Math.PI * 2);
-      ctx.value!.fillStyle = '#ffffff';
-      ctx.value!.fill();
-
-      ctx.value!.restore();
-
-      // For frozen bullets, add snowflake effect on the core
-      if (projectile.isFrozenBullet) {
-        ctx.value!.save();
-        ctx.value!.translate(projectile.x, projectile.y);
-        ctx.value!.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.value!.lineWidth = 1.5;
-
-        // Draw snowflake pattern
-        for (let i = 0; i < 6; i++) {
-          ctx.value!.rotate(Math.PI / 3);
-          ctx.value!.beginPath();
-          ctx.value!.moveTo(0, -projectile.size * 0.8);
-          ctx.value!.lineTo(0, projectile.size * 0.8);
-          ctx.value!.stroke();
-
-          // Add small branches
-          ctx.value!.beginPath();
-          ctx.value!.moveTo(0, -projectile.size * 0.4);
-          ctx.value!.lineTo(-projectile.size * 0.3, -projectile.size * 0.6);
-          ctx.value!.moveTo(0, -projectile.size * 0.4);
-          ctx.value!.lineTo(projectile.size * 0.3, -projectile.size * 0.6);
-          ctx.value!.stroke();
-        }
-
-        ctx.value!.restore();
+        // Triangle lightning shot for normal projectiles
+        drawTriangleProjectile(projectile, angle);
       }
     });
+  };
+
+  // Draw sphere projectile (bouncing shots)
+  const drawSphereProjectile = (projectile: Projectile, angle: number) => {
+    if (!ctx.value) return;
+
+    const sphereSize = projectile.size * 1.2;
+    const baseColor = projectile.isCritical ? '#ff4444' : '#4A90E2'; // Red for crit, blue for normal
+    const highlightColor = projectile.isCritical ? '#ff8888' : '#74B4F2';
+
+    // Check if this is a kinetic mastery enhanced projectile (speed > 1.5 indicates upgrades)
+    const isKineticEnhanced = projectile.speed > 1.5;
+    const kineticLevel = isKineticEnhanced ? Math.floor((projectile.speed - 1) / 0.25) : 0;
+
+    ctx.value.save();
+
+    // Enhanced motion trail for kinetic mastery
+    const trailLength = isKineticEnhanced ? Math.min(sphereSize * 5, 50) : Math.min(sphereSize * 3, 30);
+    const trailSegments = isKineticEnhanced ? 8 : 5;
+    const trailAngle = Math.atan2(projectile.y - projectile.targetY, projectile.x - projectile.targetX);
+
+    for (let i = 0; i < trailSegments; i++) {
+      const trailProgress = i / (trailSegments - 1);
+      const trailX = projectile.x + Math.cos(trailAngle) * trailLength * trailProgress;
+      const trailY = projectile.y + Math.sin(trailAngle) * trailLength * trailProgress;
+      const trailSize = sphereSize * (1 - trailProgress * 0.6);
+      const trailAlpha = (1 - trailProgress) * (isKineticEnhanced ? 0.5 : 0.3);
+
+      const trailGradient = ctx.value!.createRadialGradient(
+        trailX, trailY, 0,
+        trailX, trailY, trailSize
+      );
+
+      // Kinetic bullets have electric blue trails
+      const trailColor = isKineticEnhanced ? '#00ffff' : baseColor;
+      trailGradient.addColorStop(0, `${trailColor}${Math.floor(trailAlpha * 255).toString(16).padStart(2, '0')}`);
+      trailGradient.addColorStop(1, `${trailColor}00`);
+
+      ctx.value!.beginPath();
+      ctx.value!.arc(trailX, trailY, trailSize, 0, Math.PI * 2);
+      ctx.value!.fillStyle = trailGradient;
+      ctx.value!.fill();
+    }
+
+    // Add kinetic sparks for enhanced bullets
+    if (isKineticEnhanced) {
+      const sparkCount = Math.min(kineticLevel * 2, 8);
+      for (let i = 0; i < sparkCount; i++) {
+        const sparkAngle = Math.random() * Math.PI * 2;
+        const sparkDistance = sphereSize * (1 + Math.random() * 0.5);
+        const sparkX = projectile.x + Math.cos(sparkAngle) * sparkDistance;
+        const sparkY = projectile.y + Math.sin(sparkAngle) * sparkDistance;
+        const sparkSize = 1 + Math.random() * 2;
+
+        ctx.value!.fillStyle = '#00ffff';
+        ctx.value!.shadowColor = '#00ffff';
+        ctx.value!.shadowBlur = 5;
+        ctx.value!.beginPath();
+        ctx.value!.arc(sparkX, sparkY, sparkSize, 0, Math.PI * 2);
+        ctx.value!.fill();
+        ctx.value!.shadowBlur = 0;
+      }
+    }
+
+    // Enhanced outer glow for kinetic bullets
+    const glowMultiplier = isKineticEnhanced ? 1.5 : 1;
+    const outerGlow = ctx.value!.createRadialGradient(
+      projectile.x, projectile.y, sphereSize * 0.5,
+      projectile.x, projectile.y, sphereSize * 2 * glowMultiplier
+    );
+    const glowColor = isKineticEnhanced ? '#00ffff' : baseColor;
+    outerGlow.addColorStop(0, `${glowColor}80`);
+    outerGlow.addColorStop(0.7, `${glowColor}40`);
+    outerGlow.addColorStop(1, `${glowColor}00`);
+
+    ctx.value!.beginPath();
+    ctx.value!.arc(projectile.x, projectile.y, sphereSize * 2 * glowMultiplier, 0, Math.PI * 2);
+    ctx.value!.fillStyle = outerGlow;
+    ctx.value!.fill();
+
+    // Main sphere body with gradient for 3D effect
+    const sphereGradient = ctx.value!.createRadialGradient(
+      projectile.x - sphereSize * 0.3, projectile.y - sphereSize * 0.3, 0,
+      projectile.x, projectile.y, sphereSize
+    );
+
+    // Kinetic bullets have electric blue cores
+    if (isKineticEnhanced) {
+      sphereGradient.addColorStop(0, '#ffffff');
+      sphereGradient.addColorStop(0.3, '#00ffff');
+      sphereGradient.addColorStop(1, '#004466');
+    } else {
+      sphereGradient.addColorStop(0, highlightColor);
+      sphereGradient.addColorStop(0.3, baseColor);
+      sphereGradient.addColorStop(1, '#1a4480');
+    }
+
+    ctx.value!.beginPath();
+    ctx.value!.arc(projectile.x, projectile.y, sphereSize, 0, Math.PI * 2);
+    ctx.value!.fillStyle = sphereGradient;
+    ctx.value!.fill();
+
+    // Add bright highlight for 3D sphere effect
+    const highlight = ctx.value!.createRadialGradient(
+      projectile.x - sphereSize * 0.4, projectile.y - sphereSize * 0.4, 0,
+      projectile.x - sphereSize * 0.4, projectile.y - sphereSize * 0.4, sphereSize * 0.6
+    );
+    highlight.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+    highlight.addColorStop(0.3, 'rgba(255, 255, 255, 0.4)');
+    highlight.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+    ctx.value!.beginPath();
+    ctx.value!.arc(projectile.x - sphereSize * 0.4, projectile.y - sphereSize * 0.4, sphereSize * 0.6, 0, Math.PI * 2);
+    ctx.value!.fillStyle = highlight;
+    ctx.value!.fill();
+
+    // Enhanced energy particles for kinetic mastery
+    const particleCount = isKineticEnhanced ? 10 : 6;
+    const particleSpeed = isKineticEnhanced ? 0.008 : 0.005;
+    for (let i = 0; i < particleCount; i++) {
+      const particleAngle = (i / particleCount) * Math.PI * 2 + Date.now() * particleSpeed;
+      const particleDistance = sphereSize * (isKineticEnhanced ? 1.5 : 1.3);
+      const particleX = projectile.x + Math.cos(particleAngle) * particleDistance;
+      const particleY = projectile.y + Math.sin(particleAngle) * particleDistance;
+      const particleSize = (1 + Math.sin(Date.now() * 0.01 + i) * 0.5) * (isKineticEnhanced ? 1.5 : 1);
+
+      const particleColor = isKineticEnhanced ? '#00ffff' : highlightColor;
+      ctx.value!.fillStyle = `${particleColor}AA`;
+      ctx.value!.beginPath();
+      ctx.value!.arc(particleX, particleY, particleSize, 0, Math.PI * 2);
+      ctx.value!.fill();
+    }
+
+    ctx.value.restore();
+  };
+
+  // Draw triangle lightning projectile (normal shots)
+  const drawTriangleProjectile = (projectile: Projectile, angle: number) => {
+    if (!ctx.value) return;
+
+    // Check if this is a kinetic mastery enhanced projectile
+    const isKineticEnhanced = projectile.speed > 1.5;
+    const kineticLevel = isKineticEnhanced ? Math.floor((projectile.speed - 1) / 0.25) : 0;
+
+    // Colors based on critical hit and kinetic enhancement
+    let baseColor = projectile.isCritical ? '#ff3333' : '#ffff00'; // Red for crit, yellow for normal
+    let glowColor = projectile.isCritical ? '#ff6666' : '#ffff88';
+
+    // Override colors for kinetic enhanced bullets
+    if (isKineticEnhanced) {
+      baseColor = projectile.isCritical ? '#ff00ff' : '#00ffff'; // Magenta for crit, cyan for normal
+      glowColor = projectile.isCritical ? '#ff88ff' : '#88ffff';
+    }
+
+    ctx.value.save();
+    ctx.value.translate(projectile.x, projectile.y);
+    ctx.value.rotate(angle);
+
+    // Enhanced lightning trail for kinetic mastery
+    const trailLength = isKineticEnhanced ? projectile.size * 12 : projectile.size * 8;
+    const trailSegments = isKineticEnhanced ? 8 : 5;
+
+    for (let i = 0; i < trailSegments; i++) {
+      const segmentProgress = i / (trailSegments - 1);
+      const segmentX = -trailLength * segmentProgress;
+      const alpha = (1 - segmentProgress) * (isKineticEnhanced ? 0.8 : 0.6);
+
+      ctx.value.strokeStyle = `${baseColor}${Math.floor(alpha * 255).toString(16).padStart(2, '0')}`;
+      ctx.value.lineWidth = projectile.size * (1 - segmentProgress * 0.5) * (isKineticEnhanced ? 1.3 : 1);
+      ctx.value.beginPath();
+      ctx.value.moveTo(segmentX, 0);
+      ctx.value.lineTo(segmentX - projectile.size * 2, 0);
+      ctx.value.stroke();
+
+      // Add electric arcs for kinetic enhanced bullets
+      if (isKineticEnhanced && i < trailSegments - 2) {
+        const arcHeight = (Math.random() - 0.5) * projectile.size * 2;
+        ctx.value.strokeStyle = `${baseColor}${Math.floor(alpha * 0.6 * 255).toString(16).padStart(2, '0')}`;
+        ctx.value.lineWidth = 1;
+        ctx.value.beginPath();
+        ctx.value.moveTo(segmentX, 0);
+        ctx.value.quadraticCurveTo(segmentX - projectile.size, arcHeight, segmentX - projectile.size * 2, 0);
+        ctx.value.stroke();
+      }
+    }
+
+    // Add kinetic sparks around the projectile
+    if (isKineticEnhanced) {
+      const sparkCount = Math.min(kineticLevel * 3, 12);
+      for (let i = 0; i < sparkCount; i++) {
+        const sparkAngle = Math.random() * Math.PI * 2;
+        const sparkDistance = projectile.size * (1 + Math.random() * 2);
+        const sparkX = Math.cos(sparkAngle) * sparkDistance;
+        const sparkY = Math.sin(sparkAngle) * sparkDistance;
+        const sparkLength = projectile.size * 0.5;
+
+        ctx.value.strokeStyle = baseColor;
+        ctx.value.lineWidth = 1;
+        ctx.value.beginPath();
+        ctx.value.moveTo(sparkX, sparkY);
+        ctx.value.lineTo(sparkX + (Math.random() - 0.5) * sparkLength, sparkY + (Math.random() - 0.5) * sparkLength);
+        ctx.value.stroke();
+      }
+    }
+
+    // Draw triangle projectile body with kinetic enhancement
+    const triangleSize = projectile.isCritical ? projectile.size * 1.5 : projectile.size;
+    const enhancedSize = isKineticEnhanced ? triangleSize * 1.2 : triangleSize;
+
+    ctx.value.beginPath();
+    ctx.value.moveTo(enhancedSize * 1.5, 0);
+    ctx.value.lineTo(-enhancedSize * 0.5, enhancedSize);
+    ctx.value.lineTo(-enhancedSize * 0.5, -enhancedSize);
+    ctx.value.closePath();
+
+    // Enhanced glow effect for kinetic bullets
+    if (isKineticEnhanced) {
+      ctx.value.shadowColor = baseColor;
+      ctx.value.shadowBlur = 15;
+    }
+
+    // Fill with glow effect
+    ctx.value.fillStyle = glowColor;
+    ctx.value.fill();
+    ctx.value.strokeStyle = baseColor;
+    ctx.value.lineWidth = isKineticEnhanced ? 3 : 2;
+    ctx.value.stroke();
+
+    // Reset shadow
+    ctx.value.shadowBlur = 0;
+
+    // Add bright core
+    ctx.value.beginPath();
+    ctx.value.moveTo(enhancedSize * 0.8, 0);
+    ctx.value.lineTo(-enhancedSize * 0.2, enhancedSize * 0.5);
+    ctx.value.lineTo(-enhancedSize * 0.2, -enhancedSize * 0.5);
+    ctx.value.closePath();
+    ctx.value.fillStyle = '#ffffff';
+    ctx.value.fill();
+
+    ctx.value.restore();
+  };
+
+  // Draw laser beam projectile (bouncing shots)
+  const drawLaserBeam = (projectile: Projectile, angle: number) => {
+    if (!ctx.value) return;
+
+    // For bouncing projectiles, we want to draw a continuous beam from source to current position
+    // and potentially to the last bounce point
+
+    // Calculate the source position (where the projectile started)
+    const sourceX = projectile.x - (projectile.targetX - projectile.x) * projectile.progress / (1 - projectile.progress || 0.001);
+    const sourceY = projectile.y - (projectile.targetY - projectile.y) * projectile.progress / (1 - projectile.progress || 0.001);
+
+    // Draw continuous beam from source to current position
+    drawLaserSegment(sourceX, sourceY, projectile.x, projectile.y);
+
+    // If there was a previous bounce, also draw from last bounce point
+    if (projectile.lastBounceX !== null && projectile.lastBounceY !== null) {
+      // Draw beam from last bounce to current position
+      drawLaserSegment(projectile.lastBounceX, projectile.lastBounceY, projectile.x, projectile.y);
+    }
+  };
+
+  // Helper function to draw a laser segment between two points
+  const drawLaserSegment = (x1: number, y1: number, x2: number, y2: number) => {
+    if (!ctx.value) return;
+
+    const beamWidth = 3;
+
+    // Calculate beam length and angle
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+
+    // Don't draw if distance is too small
+    if (distance < 5) return;
+
+    ctx.value.save();
+
+    // Outer glow layer (widest, most transparent)
+    ctx.value.strokeStyle = 'rgba(74, 144, 226, 0.2)';
+    ctx.value.lineWidth = beamWidth * 4;
+    ctx.value.lineCap = 'round';
+    ctx.value.beginPath();
+    ctx.value.moveTo(x1, y1);
+    ctx.value.lineTo(x2, y2);
+    ctx.value.stroke();
+
+    // Middle glow layer
+    ctx.value.strokeStyle = 'rgba(74, 144, 226, 0.5)';
+    ctx.value.lineWidth = beamWidth * 2;
+    ctx.value.beginPath();
+    ctx.value.moveTo(x1, y1);
+    ctx.value.lineTo(x2, y2);
+    ctx.value.stroke();
+
+    // Core beam (brightest, narrowest)
+    ctx.value.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.value.lineWidth = beamWidth * 0.5;
+    ctx.value.beginPath();
+    ctx.value.moveTo(x1, y1);
+    ctx.value.lineTo(x2, y2);
+    ctx.value.stroke();
+
+    // Add energy particles along the beam
+    const particleCount = Math.floor(distance / 20);
+    for (let i = 0; i < particleCount; i++) {
+      const t = i / particleCount;
+      const particleX = x1 + dx * t + (Math.random() - 0.5) * beamWidth;
+      const particleY = y1 + dy * t + (Math.random() - 0.5) * beamWidth;
+
+      ctx.value.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.value.beginPath();
+      ctx.value.arc(particleX, particleY, 0.5 + Math.random() * 1, 0, Math.PI * 2);
+      ctx.value.fill();
+    }
+
+    ctx.value.restore();
+  };
+
+  // Draw crescent projectile (multi-shot)
+  const drawCrescentProjectile = (projectile: Projectile, angle: number) => {
+    if (!ctx.value) return;
+
+    ctx.value.save();
+    ctx.value.translate(projectile.x, projectile.y);
+    ctx.value.rotate(angle);
+
+    const crescentSize = projectile.size * 1.2;
+
+    // Draw outer crescent glow
+    ctx.value.fillStyle = 'rgba(139, 92, 246, 0.4)';
+    ctx.value.beginPath();
+    ctx.value.arc(0, 0, crescentSize * 1.5, -Math.PI * 0.6, Math.PI * 0.6);
+    ctx.value.arc(crescentSize * 0.5, 0, crescentSize * 1.2, Math.PI * 0.6, -Math.PI * 0.6, true);
+    ctx.value.closePath();
+    ctx.value.fill();
+
+    // Draw main crescent body
+    ctx.value.fillStyle = '#8B5CF6';
+    ctx.value.beginPath();
+    ctx.value.arc(0, 0, crescentSize, -Math.PI * 0.5, Math.PI * 0.5);
+    ctx.value.arc(crescentSize * 0.3, 0, crescentSize * 0.8, Math.PI * 0.5, -Math.PI * 0.5, true);
+    ctx.value.closePath();
+    ctx.value.fill();
+
+    // Add bright edge
+    ctx.value.strokeStyle = '#ffffff';
+    ctx.value.lineWidth = 2;
+    ctx.value.beginPath();
+    ctx.value.arc(0, 0, crescentSize, -Math.PI * 0.5, Math.PI * 0.5);
+    ctx.value.stroke();
+
+    // Add inner shine
+    ctx.value.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.value.beginPath();
+    ctx.value.arc(0, 0, crescentSize * 0.6, -Math.PI * 0.4, Math.PI * 0.4);
+    ctx.value.arc(crescentSize * 0.2, 0, crescentSize * 0.5, Math.PI * 0.4, -Math.PI * 0.4, true);
+    ctx.value.closePath();
+    ctx.value.fill();
+
+    ctx.value.restore();
   };
 
   // Draw all explosions
@@ -290,20 +567,20 @@ export function useGameRenderer(canvasWidth: number, canvasHeight: number) {
   // Draw current typed text below the player
   const drawTypedText = (player: Player, typedText: string) => {
     if (!ctx.value || !typedText) return;
-    
+
     ctx.value.font = 'bold 20px Arial'; // Slightly smaller than before
     ctx.value.fillStyle = '#ffff00'; // Changed from blue to yellow
     ctx.value.textAlign = 'center';
     ctx.value.textBaseline = 'middle';
-    
+
     // Position text above the Earth where level used to be
     const textY = player.y - player.radius - 45;
-    
+
     // Add stroke for better visibility
     ctx.value.strokeStyle = 'rgba(0, 0, 0, 0.8)';
     ctx.value.lineWidth = 3;
     ctx.value.strokeText(typedText, player.x, textY);
-    
+
     // Draw text without background
     ctx.value.fillText(typedText, player.x, textY);
   };
@@ -465,11 +742,11 @@ export function useGameRenderer(canvasWidth: number, canvasHeight: number) {
         ctx.value!.strokeStyle = '#000000';
         ctx.value!.lineWidth = 2;
         ctx.value!.strokeText(star.word, star.x, wordY);
-        
+
         ctx.value!.fillStyle = isHighlighted ? '#ffff00' : '#ffffff';
         ctx.value!.fillText(star.word, star.x, wordY);
       }
-      
+
       ctx.value!.restore();
 
       // Draw time remaining indicator
@@ -534,6 +811,145 @@ export function useGameRenderer(canvasWidth: number, canvasHeight: number) {
         ctx.value!.restore();
       }
     });
+  };
+
+  // Draw ice arrow projectile (Arctic Barrage skill)
+  const drawIceArrow = (projectile: Projectile, angle: number) => {
+    if (!ctx.value) return;
+
+    const arrowSize = projectile.size;
+    const arrowColor = '#00BFFF'; // Deep sky blue
+    const glowColor = '#87CEEB'; // Sky blue
+
+    ctx.value.save();
+
+    // Ice trail effect
+    const trailLength = arrowSize * 3;
+    const trailOpacity = 0.6;
+
+    for (let i = 0; i < 5; i++) {
+      const trailX = projectile.x - Math.cos(angle) * (i * 8);
+      const trailY = projectile.y - Math.sin(angle) * (i * 8);
+      const trailSize = arrowSize * (1 - i * 0.15);
+      const opacity = trailOpacity * (1 - i * 0.2);
+
+      ctx.value.globalAlpha = opacity;
+
+      // Ice crystal trail
+      ctx.value.beginPath();
+      ctx.value.arc(trailX, trailY, trailSize * 0.8, 0, Math.PI * 2);
+      ctx.value.fillStyle = glowColor;
+      ctx.value.fill();
+    }
+
+    ctx.value.globalAlpha = 1;
+    ctx.value.translate(projectile.x, projectile.y);
+    ctx.value.rotate(angle);
+
+    // Arrow shaft
+    ctx.value.fillStyle = arrowColor;
+    ctx.value.fillRect(-arrowSize * 0.8, -arrowSize * 0.1, arrowSize * 1.6, arrowSize * 0.2);
+
+    // Arrow head
+    ctx.value.beginPath();
+    ctx.value.moveTo(arrowSize * 0.8, 0);
+    ctx.value.lineTo(arrowSize * 0.3, -arrowSize * 0.3);
+    ctx.value.lineTo(arrowSize * 0.3, arrowSize * 0.3);
+    ctx.value.closePath();
+    ctx.value.fill();
+
+    // Arrow fletching
+    ctx.value.beginPath();
+    ctx.value.moveTo(-arrowSize * 0.8, 0);
+    ctx.value.lineTo(-arrowSize * 0.5, -arrowSize * 0.2);
+    ctx.value.lineTo(-arrowSize * 0.5, arrowSize * 0.2);
+    ctx.value.closePath();
+    ctx.value.fill();
+
+    // Ice glow effect
+    ctx.value.shadowColor = glowColor;
+    ctx.value.shadowBlur = 15;
+    ctx.value.strokeStyle = '#FFFFFF';
+    ctx.value.lineWidth = 1;
+    ctx.value.stroke();
+
+    ctx.value.restore();
+  };
+
+  // Draw fire meteor projectile (Meteor Storm skill)
+  const drawFireMeteor = (projectile: Projectile, angle: number) => {
+    if (!ctx.value) return;
+
+    const meteorSize = projectile.size;
+    const coreColor = '#FF4500'; // Orange red
+    const outerColor = '#FF6347'; // Tomato
+    const trailColor = '#FFD700'; // Gold
+
+    ctx.value.save();
+
+    // Fire trail effect - more dramatic
+    const trailLength = meteorSize * 5;
+
+    for (let i = 0; i < 8; i++) {
+      const trailX = projectile.x - Math.cos(angle) * (i * 12);
+      const trailY = projectile.y - Math.sin(angle) * (i * 12);
+      const trailSize = meteorSize * (1.2 - i * 0.12);
+      const opacity = 0.8 * (1 - i * 0.1);
+
+      ctx.value.globalAlpha = opacity;
+
+      // Outer flame
+      const gradient = ctx.value.createRadialGradient(
+        trailX, trailY, 0,
+        trailX, trailY, trailSize
+      );
+      gradient.addColorStop(0, trailColor);
+      gradient.addColorStop(0.6, outerColor);
+      gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+
+      ctx.value.beginPath();
+      ctx.value.arc(trailX, trailY, trailSize, 0, Math.PI * 2);
+      ctx.value.fillStyle = gradient;
+      ctx.value.fill();
+    }
+
+    ctx.value.globalAlpha = 1;
+
+    // Main meteor body
+    const meteorGradient = ctx.value.createRadialGradient(
+      projectile.x, projectile.y, 0,
+      projectile.x, projectile.y, meteorSize * 1.5
+    );
+    meteorGradient.addColorStop(0, '#FFFFFF');
+    meteorGradient.addColorStop(0.3, coreColor);
+    meteorGradient.addColorStop(0.7, outerColor);
+    meteorGradient.addColorStop(1, 'rgba(255, 0, 0, 0.3)');
+
+    ctx.value.beginPath();
+    ctx.value.arc(projectile.x, projectile.y, meteorSize * 1.2, 0, Math.PI * 2);
+    ctx.value.fillStyle = meteorGradient;
+    ctx.value.fill();
+
+    // Inner core
+    ctx.value.beginPath();
+    ctx.value.arc(projectile.x, projectile.y, meteorSize * 0.6, 0, Math.PI * 2);
+    ctx.value.fillStyle = '#FFFFFF';
+    ctx.value.fill();
+
+    // Sparks and embers
+    for (let i = 0; i < 3; i++) {
+      const sparkAngle = angle + (Math.random() - 0.5) * 0.5;
+      const sparkDistance = meteorSize * (1 + Math.random() * 2);
+      const sparkX = projectile.x - Math.cos(sparkAngle) * sparkDistance;
+      const sparkY = projectile.y - Math.sin(sparkAngle) * sparkDistance;
+
+      ctx.value.beginPath();
+      ctx.value.arc(sparkX, sparkY, 2 + Math.random() * 3, 0, Math.PI * 2);
+      ctx.value.fillStyle = trailColor;
+      ctx.value.fill();
+    }
+
+    ctx.value.restore();
   };
 
   // Main render function

@@ -10,7 +10,8 @@ import {
   createInitialGameState,
   generateRelics,
   getRandomRelic,
-  createRelicStar
+  createRelicStar,
+  getRandomSkills
 } from '../utils/gameModels';
 import {
   type Projectile,
@@ -34,6 +35,8 @@ import {
   pauseEnemySpawning,
   resumeEnemySpawning,
 } from '../utils/mechanics/gameMechanics';
+import { useGameRenderer } from './useGameRenderer';
+import { getRandomWord } from '../utils/wordGenerator';
 
 export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   // Core game state
@@ -87,7 +90,6 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     savedTimerStates: {
       nextRelicStarSpawn: 0,
       autoFireNextTime: 0,
-      frozenBulletNextTime: 0,
     },
 
     // Start pause (used by all pause types)
@@ -102,7 +104,6 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       pauseSystem.savedTimerStates = {
         nextRelicStarSpawn: nextRelicStarSpawn.value - now,
         autoFireNextTime: gameState.value.player.nextAutoFireTime ? gameState.value.player.nextAutoFireTime - now : 0,
-        frozenBulletNextTime: gameState.value.player.nextFrozenBulletTime ? gameState.value.player.nextFrozenBulletTime - now : 0,
       };
 
       // Pause enemy spawning
@@ -125,10 +126,6 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
       if (pauseSystem.savedTimerStates.autoFireNextTime > 0) {
         gameState.value.player.nextAutoFireTime = now + pauseSystem.savedTimerStates.autoFireNextTime;
-      }
-
-      if (pauseSystem.savedTimerStates.frozenBulletNextTime > 0) {
-        gameState.value.player.nextFrozenBulletTime = now + pauseSystem.savedTimerStates.frozenBulletNextTime;
       }
 
       // Resume enemy spawning
@@ -177,8 +174,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     clearInterval(spawnTimerId.value);
     clearInterval(autoFireTimerId.value);
 
-    // Initialize relic spawn system
-    nextRelicStarSpawn.value = Date.now() + (20000 + Math.random() * 10000); // First spawn after 20-30 seconds
+    // Initialize relic spawn system - spawn every 2 minutes
+    nextRelicStarSpawn.value = Date.now() + 120000; // First spawn after 2 minutes
 
     // Initialize stars
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
@@ -212,7 +209,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     resetTyping();
 
     // Initialize relic spawn system
-    nextRelicStarSpawn.value = Date.now() + (20000 + Math.random() * 10000); // First spawn after 20-30 seconds
+    nextRelicStarSpawn.value = Date.now() + 120000; // First spawn after 2 minutes
 
     // Initialize stars
     stars.value = initializeStars(100, canvasWidth, canvasHeight);
@@ -279,6 +276,79 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
           enemy.color = enemy.color.replace('88', '');
         }
       }
+
+      // Update burn effects on enemies
+      if (enemy.isBurning && enemy.nextBurnTick && Date.now() >= enemy.nextBurnTick) {
+        // Apply burn damage
+        enemy.health -= enemy.burnDamage;
+        createDamageNumber(enemy.x, enemy.y - 10, Math.round(enemy.burnDamage), '#ff4444', false, 'BURN');
+
+        // Check if burn effect should end
+        if (enemy.burnUntil && Date.now() >= enemy.burnUntil) {
+          enemy.isBurning = false;
+          enemy.burnUntil = null;
+          enemy.burnDamage = 0;
+          enemy.nextBurnTick = null;
+        } else {
+          // Schedule next burn tick
+          enemy.nextBurnTick = Date.now() + enemy.burnTickInterval;
+        }
+
+        // Check if enemy died from burn
+        if (enemy.health <= 0) {
+          // Track kills for skill systems
+          const { player } = gameState.value;
+          if (player.frostMasteryLevel > 0) {
+            player.frostMasteryKills = (player.frostMasteryKills || 0) + 1;
+          }
+          if (player.fireMasteryLevel > 0) {
+            player.fireMasteryKills = (player.fireMasteryKills || 0) + 1;
+          }
+
+          // Remove enemy from array
+          const enemyIndex = enemies.indexOf(enemy);
+          if (enemyIndex > -1) {
+            enemies.splice(enemyIndex, 1);
+            gameState.value.waveEnemiesDefeated++;
+
+            // Update score and enemy kill count
+            gameState.value.score += enemy.pointValue;
+            gameState.value.enemiesKilled++;
+          }
+
+          // Create explosion effect
+          createExplosion(enemy.x, enemy.y, '#ff4444', 20, 0);
+
+          // Award XP and check for level up
+          const xpGain = Math.floor(enemy.pointValue * player.experienceMultiplier);
+          player.xp += xpGain;
+          createDamageNumber(enemy.x, enemy.y - 40, xpGain, '#00ff00', false, `+${xpGain} XP`);
+
+          // Check for level up
+          if (player.xp >= player.xpToNextLevel) {
+            // Level up effect
+            createExplosion(player.x, player.y, '#ffffff', 50, 0);
+            // Start pause using centralized system for level up
+            pauseSystem.startPause();
+
+            // Increase level
+            player.level++;
+            player.xp = 0;
+            player.xpToNextLevel = Math.floor(player.xpToNextLevel * 1.2);
+
+            // Increase base stats
+            player.damage += 2;
+            player.maxShield += 10;
+            player.shield = player.maxShield;
+
+            // Pause game for skill selection
+            gameState.value.isPausedForLevelUp = true;
+
+            // Generate skill choices
+            availableSkillChoices.value = getRandomSkills(gameState.value.availableSkills);
+          }
+        }
+      }
     }
 
     // Update relic stars
@@ -289,8 +359,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       const now = Date.now();
       if (now >= nextRelicStarSpawn.value) {
         spawnRelicStar();
-        // Schedule next relic star spawn (30-60 seconds)
-        nextRelicStarSpawn.value = now + (30000 + Math.random() * 30000);
+        // Schedule next relic star spawn every 2 minutes
+        nextRelicStarSpawn.value = now + 120000; // 2 minutes
       }
     }
 
@@ -367,8 +437,9 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       projectiles.value,
       deltaTime.value,
       gameState.value.enemies,
-      handleProjectileHit,
-      createExplosion
+      handleEnemyHit,
+      createExplosion,
+      gameState.value.player // Pass player for bounceRange access
     );
 
     // Update effects
@@ -384,10 +455,11 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       startWave(gameState.value.wave + 1);
     }
 
-    // Update auto-fire (only if not effectively paused)
-    if (!isEffectivelyPaused()) {
-      updateAutoFire();
-    }
+    // Update auto-fire system
+    updateAutoFire();
+
+    // Update skill-based abilities (frost and fire)
+    updateSkillAbilities();
 
     // Update frozen bullets (only if not effectively paused)
     if (!isEffectivelyPaused()) {
@@ -579,25 +651,88 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   const fireAtEnemy = (enemy: Enemy) => {
     const { player } = gameState.value;
 
-    // Check if triple shot triggers based on chance
-    const tripleShot = Math.random() < player.multiShotChance;
-    const shotsToFire = tripleShot ? 2 + player.multiShotTargets : 1;
+    // Check if this is a purple enemy that triggers multi-shot
+    if (enemy.enemyType === 'purple') {
+      player.purpleKillCount++;
 
-    // Fire shot(s)
-    for (let shotIndex = 0; shotIndex < shotsToFire; shotIndex++) {
-      // Each shot has independent chance calculations
+      if (player.purpleKillCount >= 3) {
+        // Reset counter and fire multi-shot instead of normal shot
+        player.purpleKillCount = 0;
+        fireMultiShot(enemy);
+        return; // Don't fire normal shot
+      }
+    }
+
+    // Check if this is a blue enemy that triggers bouncing shot
+    if (enemy.enemyType === 'blue') {
+      fireBouncingShot(enemy);
+      return; // Don't fire normal shot
+    }
+
+    // Fire normal shot for other enemies
+    fireNormalShot(enemy);
+  };
+
+  // Fire normal shot
+  const fireNormalShot = (enemy: Enemy) => {
+    const { player } = gameState.value;
+    const baseDamage = player.damage;
+    const isCritical = Math.random() < player.critChance;
+    const damage = isCritical ? baseDamage * player.critMultiplier : baseDamage;
+
+    fireProjectile(enemy, damage, isCritical, false, true, 'normal');
+  };
+
+  // Fire multi-shot at multiple targets
+  const fireMultiShot = (primaryTarget: Enemy) => {
+    const { player } = gameState.value;
+    const targets = findMultiShotTargets(primaryTarget, player.multiShotTargets);
+
+    targets.forEach((target, index) => {
       const baseDamage = player.damage;
       const isCritical = Math.random() < player.critChance;
       const damage = isCritical ? baseDamage * player.critMultiplier : baseDamage;
 
-      // Add slight delay between shots for visual effect (only if multiple shots)
-      const delay = tripleShot ? shotIndex * 50 : 0;
       setTimeout(() => {
-        // Only the first shot (shotIndex 0) should be a main shot that can change enemy words
-        // Additional shots are multi-shots and should not change words to avoid confusing the player
-        fireProjectile(enemy, damage, isCritical, shotIndex > 0, shotIndex === 0);
-      }, delay);
+        fireProjectile(target, damage, isCritical, true, index === 0, 'multishot');
+      }, index * 50);
+    });
+
+    // Show multi-shot indicator
+    createDamageNumber(primaryTarget.x, primaryTarget.y - 30, 0, '#8B5CF6', false, "MULTI-SHOT!");
+  };
+
+  // Fire bouncing shot
+  const fireBouncingShot = (primaryTarget: Enemy) => {
+    const { player } = gameState.value;
+    const baseDamage = player.damage;
+    const isCritical = Math.random() < player.critChance;
+    const damage = isCritical ? baseDamage * player.critMultiplier : baseDamage;
+
+    fireProjectile(primaryTarget, damage, isCritical, false, true, 'bouncing');
+
+    // Show bouncing shot indicator
+    createDamageNumber(primaryTarget.x, primaryTarget.y - 30, 0, '#4A90E2', false, "BOUNCE!");
+  };
+
+  // Find targets for multi-shot
+  const findMultiShotTargets = (primaryTarget: Enemy, maxTargets: number): Enemy[] => {
+    const targets = [primaryTarget];
+    const availableEnemies = gameState.value.enemies.filter(e => e.id !== primaryTarget.id);
+
+    // Sort by distance from player
+    availableEnemies.sort((a, b) => {
+      const distA = Math.sqrt((a.x - gameState.value.player.x) ** 2 + (a.y - gameState.value.player.y) ** 2);
+      const distB = Math.sqrt((b.x - gameState.value.player.x) ** 2 + (b.y - gameState.value.player.y) ** 2);
+      return distA - distB;
+    });
+
+    // Add closest enemies up to maxTargets
+    for (let i = 0; i < Math.min(maxTargets - 1, availableEnemies.length); i++) {
+      targets.push(availableEnemies[i]);
     }
+
+    return targets;
   };
 
   // Legacy handleTyping function (keep for compatibility but redirect to new system)
@@ -608,65 +743,122 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   };
 
   // Fire a projectile at a target enemy
-  const fireProjectile = (target: Enemy, damage: number, isCritical: boolean, isMultiShot: boolean = false, isMainShot: boolean = false) => {
-    // Apply multipliers
-    const finalDamage = Math.floor(damage * gameState.value.player.damageMultiplier);
-    const finalSpeed = gameState.value.player.projectileSpeed;
+  const fireProjectile = (target: Enemy, damage: number, isCritical: boolean, isMultiShot: boolean = false, isMainShot: boolean = false, shotType: 'normal' | 'bouncing' | 'multishot' = 'normal') => {
+    const bounceCount = (shotType === 'bouncing') ? gameState.value.player.bounceCount : 0;
+
+    // Apply momentum-based damage bonus for kinetic mastery
+    // Faster bullets carry more kinetic energy and deal more damage
+    const baseSpeed = 1.0; // Base projectile speed
+    const currentSpeed = gameState.value.player.projectileSpeed;
+    const speedRatio = currentSpeed / baseSpeed;
+
+    // Kinetic energy scales with speed squared, but we use a gentler linear scale for balance
+    // Each point of speed above base gives 8% damage bonus
+    const momentumDamageMultiplier = 1 + (speedRatio - 1) * 0.08;
+    const finalDamage = damage * momentumDamageMultiplier;
+
+    // Show momentum bonus in damage numbers for enhanced bullets
+    const showMomentumBonus = momentumDamageMultiplier > 1.05; // Show bonus if > 5% increase
+
+    // Normal and multishot projectiles should NOT bounce regardless of player bounceCount
 
     const projectile = createProjectile(
       gameState.value.player.x,
       gameState.value.player.y,
       target.x,
       target.y,
-      finalDamage,
-      finalSpeed,
+      finalDamage, // Use momentum-enhanced damage
+      gameState.value.player.projectileSpeed,
       gameState.value.player.projectileSize,
       isCritical,
       gameState.value.player.aoeRadius,
       target.id,
       isMultiShot,
       false, // isDoubleShot
-      gameState.value.player.bounceCount,
-      0.35 + (gameState.value.player.bounceCount * 0.1), // Bounce chance scales with bounce count
-      isMainShot
+      bounceCount,
+      isMainShot,
+      shotType,
+      gameState.value.player // Pass player for relic effects
     );
 
     projectiles.value.push(projectile);
+
+    // Show kinetic mastery momentum bonus effect
+    if (showMomentumBonus && isMainShot) {
+      createDamageNumber(
+        gameState.value.player.x + 20,
+        gameState.value.player.y - 40,
+        0,
+        '#00ffff',
+        false,
+        `KINETIC +${Math.round((momentumDamageMultiplier - 1) * 100)}%`
+      );
+    }
   };
 
-  // Fire frozen bullets
-  const fireFrozenBullets = () => {
+  // Fire ice arrows (Arctic Barrage skill)
+  const fireIceArrows = () => {
     const { player } = gameState.value;
-    const numBullets = 12 + (player.frozenBulletCount || 0);
+    const arrowCount = player.frozenBulletCount || 8;
 
-    createDamageNumber(player.x, player.y - 30, 0, '#00ffff', false, "FROZEN BULLETS!");
-
-    for (let i = 0; i < numBullets; i++) {
-      const angle = (2 * Math.PI / numBullets) * i;
+    // Fire arrows in different directions
+    for (let i = 0; i < arrowCount; i++) {
+      const angle = (i / arrowCount) * Math.PI * 2;
       const target = findClosestEnemyInDirection(angle);
 
       if (target) {
-        const damage = player.damage * 0.2;
-        const projectile = createProjectile(
+        // Create ice projectile
+        const iceProjectile = createProjectile(
           player.x,
           player.y,
           target.x,
           target.y,
-          damage,
+          player.damage * 0.8, // Slightly reduced damage for AoE skill
           player.projectileSpeed,
           player.projectileSize,
-          false, // isCritical
-          0, // aoeRadius
+          false, // Not critical
+          0, // No AoE radius
           target.id,
-          false, // isMultiShot
-          true, // isFrozenBullet
-          0, // bounceCount
-          0, // bounceChance
-          false // isMainShot - frozen bullets are not main shots
+          false, // Not multi-shot
+          false, // Not frozen bullet
+          0, // No bounces
+          false, // Not main shot
+          'ice',
+          player
         );
-        projectiles.value.push(projectile);
+
+        projectiles.value.push(iceProjectile);
       }
     }
+  };
+
+  // Fire meteor storm (fire skill)
+  const fireMeteorStorm = () => {
+    const { player, enemies } = gameState.value;
+
+    // Target all enemies with fire meteors
+    enemies.forEach(enemy => {
+      const fireProjectile = createProjectile(
+        player.x,
+        player.y,
+        enemy.x,
+        enemy.y,
+        player.damage * 1.2, // Higher damage for fire skill
+        player.projectileSpeed * 0.8, // Slower but more dramatic
+        player.projectileSize * 1.5, // Larger meteors
+        false, // Not critical
+        0, // No AoE radius
+        enemy.id,
+        false, // Not multi-shot
+        false, // Not frozen bullet
+        0, // No bounces
+        false, // Not main shot
+        'fire',
+        player
+      );
+
+      projectiles.value.push(fireProjectile);
+    });
   };
 
   // Find closest enemy in direction
@@ -696,11 +888,11 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
   };
 
   // Handle projectile hit
-  const handleProjectileHit = (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean, isMainShot: boolean) => {
+  const handleEnemyHit = (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean, isMainShot: boolean, projectileType?: 'normal' | 'bouncing' | 'multishot' | 'ice' | 'fire') => {
     const enemy = gameState.value.enemies.find(e => e.id === enemyId);
     if (!enemy) return;
 
-    applyDamageToEnemy(enemy, damage, isCritical, isMainShot);
+    applyDamageToEnemy(enemy, damage, isCritical, isMainShot, projectileType);
 
     if (isMultiShot) {
       createDamageNumber(enemy.x + 15, enemy.y - 15, Math.round(damage), '#00ffff', isCritical);
@@ -710,33 +902,83 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
       applyFrozenEffect(enemy);
     }
 
-    // Each shot has independent chance to trigger explosive effect
-    if (Math.random() < gameState.value.player.explosiveChance) {
-      createExplosion(enemy.x, enemy.y, '#ff9500', 80, damage * 0.8);
-    }
+    // Explosion shot skill has been removed - no more explosive effects
   };
 
   // Apply damage to enemy
-  const applyDamageToEnemy = (enemy: Enemy, damage: number, isCritical: boolean, isMainShot: boolean) => {
+  const applyDamageToEnemy = (enemy: Enemy, damage: number, isCritical: boolean, isMainShot: boolean, projectileType?: 'normal' | 'bouncing' | 'multishot' | 'ice' | 'fire') => {
     const enemyCountBefore = gameState.value.enemies.length;
     const enemyWordBefore = enemy.word;
 
-    applyDamageToEnemyMechanic(
+    // Use the corrected function signature
+    const wasKilled = applyDamageToEnemyMechanic(
       enemy,
       damage,
       isCritical,
-      gameState.value,
-      createExplosion,
-      createDamageNumber,
-      () => {
+      isMainShot,
+      projectileType
+    );
+
+    // If enemy was killed, handle kill tracking and potential level up
+    if (wasKilled) {
+      // Track kills for skill systems
+      const { player } = gameState.value;
+      if (player.frostMasteryLevel > 0) {
+        player.frostMasteryKills = (player.frostMasteryKills || 0) + 1;
+      }
+      if (player.fireMasteryLevel > 0) {
+        player.fireMasteryKills = (player.fireMasteryKills || 0) + 1;
+      }
+
+      // Remove enemy from array
+      const enemyIndex = gameState.value.enemies.indexOf(enemy);
+      if (enemyIndex > -1) {
+        gameState.value.enemies.splice(enemyIndex, 1);
+        gameState.value.waveEnemiesDefeated++;
+
+        // Update score and enemy kill count
+        gameState.value.score += enemy.pointValue;
+        gameState.value.enemiesKilled++;
+      }
+
+      // Create explosion effect
+      createExplosion(enemy.x, enemy.y, enemy.color, 30, 0);
+
+      // Award XP and check for level up
+      const xpGain = Math.floor(enemy.pointValue * player.experienceMultiplier);
+      player.xp += xpGain;
+      createDamageNumber(enemy.x, enemy.y - 40, xpGain, '#00ff00', false, `+${xpGain} XP`);
+
+      // Check for level up
+      if (player.xp >= player.xpToNextLevel) {
         // Level up effect
-        createExplosion(gameState.value.player.x, gameState.value.player.y, '#ffffff', 50, 0);
+        createExplosion(player.x, player.y, '#ffffff', 50, 0);
         // Start pause using centralized system for level up
         pauseSystem.startPause();
-      },
-      availableSkillChoices,
-      isMainShot
-    );
+
+        // Increase level
+        player.level++;
+        player.xp = 0;
+        player.xpToNextLevel = Math.floor(player.xpToNextLevel * 1.2);
+
+        // Increase base stats
+        player.damage += 2;
+        player.maxShield += 10;
+        player.shield = player.maxShield;
+
+        // Pause game for skill selection
+        gameState.value.isPausedForLevelUp = true;
+
+        // Generate skill choices
+        availableSkillChoices.value = getRandomSkills(gameState.value.availableSkills);
+      }
+    } else {
+      // Enemy was hit but not killed - change its word to show the hit registered
+      if (isMainShot) { // Only change word for main shots (user typing), not auto-fire
+        enemy.word = getRandomWord();
+        enemy.typedProgress = 0; // Reset typing progress
+      }
+    }
 
     // Revalidate typing if enemy was removed or its word changed
     const enemyCountAfter = gameState.value.enemies.length;
@@ -768,7 +1010,12 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
   // Relic star management functions
   const spawnRelicStar = () => {
-    const relic = getRandomRelic(availableRelics.value);
+    const relic = getRandomRelic(availableRelics.value, gameState.value.player.collectedRelicIds);
+    if (!relic) {
+      // No more unique relics available
+      return;
+    }
+
     const relicStar = createRelicStar(
       Date.now(), // Use timestamp as unique ID
       relic,
@@ -822,6 +1069,7 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
     // Apply relic effect to player
     star.relic.applyEffect(gameState.value.player);
     gameState.value.player.relics.push(star.relic);
+    gameState.value.player.collectedRelicIds.push(star.relic.id); // Track collected relic for uniqueness
 
     // Show announcement modal and pause game using centralized system
     announcedRelic.value = star.relic;
@@ -968,18 +1216,8 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
 
   // Update frozen bullets system
   const updateFrozenBullets = () => {
-    const { player } = gameState.value;
-
-    if (player.frozenBulletCooldown !== null) {
-      const now = Date.now();
-
-      if (player.nextFrozenBulletTime && now >= player.nextFrozenBulletTime) {
-        fireFrozenBullets();
-
-        const cooldown = player.frozenBulletCooldown;
-        player.nextFrozenBulletTime = now + cooldown;
-      }
-    }
+    // Remove this entire function since we're using kill-based skills now
+    // The updateSkillAbilities function handles ice and fire skills
   };
 
   // Handle level up confirmation
@@ -1065,6 +1303,23 @@ export function useGameEngine(canvasWidth: number, canvasHeight: number) {
         pauseSystem.endPause();
         isPaused.value = false;
       }
+    }
+  };
+
+  // Update skill-based abilities (frost and fire)
+  const updateSkillAbilities = () => {
+    const { player } = gameState.value;
+
+    // Check for Arctic Barrage (frost skill) trigger
+    if (player.frostMasteryLevel > 0 && player.frostMasteryKills >= player.frostMasteryKillsRequired) {
+      fireIceArrows();
+      player.frostMasteryKills = 0; // Reset kill count
+    }
+
+    // Check for Meteor Storm (fire skill) trigger
+    if (player.fireMasteryLevel > 0 && player.fireMasteryKills >= player.fireMasteryKillsRequired) {
+      fireMeteorStorm();
+      player.fireMasteryKills = 0; // Reset kill count
     }
   };
 

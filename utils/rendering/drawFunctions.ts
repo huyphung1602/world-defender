@@ -408,7 +408,16 @@ export const drawEnemy = (ctx: CanvasRenderingContext2D, enemy: any): void => {
     // Reset shadow and draw remaining portion (white)
     ctx.shadowBlur = 0;
     ctx.shadowColor = 'transparent';
-    ctx.fillStyle = '#ffffff';
+
+    // Determine remaining text color based on enemy type
+    let remainingColor = '#ffffff'; // Default white
+    if (enemy.enemyType === 'blue') {
+      remainingColor = '#4A90E2'; // Blue for bouncing enemies
+    } else if (enemy.enemyType === 'purple') {
+      remainingColor = '#8B5CF6'; // Purple for multi-shot enemies
+    }
+
+    ctx.fillStyle = remainingColor;
     ctx.fillText(remainingPortion, startX + typedWidth, textY);
 
     // Reset text alignment
@@ -419,7 +428,21 @@ export const drawEnemy = (ctx: CanvasRenderingContext2D, enemy: any): void => {
     ctx.lineWidth = 3;
     ctx.strokeText(enemy.word, enemy.x, textY);
 
-    ctx.fillStyle = enemy.isHighlighted ? '#ffff00' : '#ffffff'; // Highlighted enemies get yellow text
+    // Determine text color based on enemy type and highlight status
+    let textColor = '#ffffff'; // Default white
+
+    if (enemy.enemyType === 'blue') {
+      textColor = '#4A90E2'; // Blue for bouncing enemies
+    } else if (enemy.enemyType === 'purple') {
+      textColor = '#8B5CF6'; // Purple for multi-shot enemies
+    }
+
+    // Override with yellow if highlighted (but not when typing is in progress)
+    if (enemy.isHighlighted && enemy.typedProgress === 0) {
+      textColor = '#ffff00'; // Yellow for highlighted enemies
+    }
+
+    ctx.fillStyle = textColor;
     ctx.fillText(enemy.word, enemy.x, textY);
   }
 

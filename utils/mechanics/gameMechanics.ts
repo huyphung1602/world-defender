@@ -24,7 +24,7 @@ export const startWave = (
   // Set wave enemy count - for continuous spawning, we'll use this as enemies per minute or similar
   gameState.waveEnemyCount = waveConfig.enemyCount;
   gameState.waveEnemiesDefeated = 0;
-  
+
   // Reset pause between waves flag for immediate start
   gameState.isPausedBetweenWaves = false;
 
@@ -45,7 +45,7 @@ export const startWave = (
     // but reduce frequency as more enemies are on screen to avoid overwhelming
     const activeEnemies = gameState.enemies.length;
     const maxActiveEnemies = Math.max(8, waveConfig.enemyCount); // At least 8, more for higher waves
-    
+
     if (activeEnemies < maxActiveEnemies) {
       spawnEnemy(gameState, canvasWidth, canvasHeight, wave, waveConfig);
       enemiesSpawned++;
@@ -149,7 +149,8 @@ const spawnEnemy = (
     wave,
     isElite,
     isBoss,
-    spawnSide
+    spawnSide,
+    gameState.player
   );
 
   gameState.enemies.push(enemy);
@@ -244,66 +245,30 @@ export const applyDamageToEnemy = (
   enemy: Enemy,
   damage: number,
   isCritical: boolean,
-  gameState: GameState,
-  onCreateExplosion: (x: number, y: number, color: string, radius?: number, damage?: number) => void,
-  onCreateDamageNumber: (x: number, y: number, value: number, color: string, isCritical?: boolean) => void,
-  onLevelUp: () => void,
-  availableSkillChoices: { value: Skill[] },
-  isMainShot: boolean = false // Only main shots (from user typing) should change words
-): void => {
+  isMainShot: boolean,
+  projectileType?: 'normal' | 'bouncing' | 'multishot' | 'ice' | 'fire'
+): boolean => {
   enemy.health -= damage;
 
-  // Create damage number
-  onCreateDamageNumber(
-    enemy.x,
-    enemy.y - enemy.radius - 10,
-    Math.round(damage),
-    isCritical ? '#ff0000' : '#ffffff',
-    isCritical
-  );
-
-  // Change the enemy word when it takes damage but isn't defeated
-  // ONLY for main shots (user-typed shots) to avoid interfering with typing
-  if (enemy.health > 0 && isMainShot) {
-    // Get a new random word
-    const newWord = getRandomWord();
-    // Only change if it's different to avoid confusion
-    if (newWord !== enemy.word) {
-      enemy.word = newWord;
+  // Apply special effects based on projectile type
+  if (projectileType === 'ice') {
+    // Apply freeze effect
+    enemy.isFrozen = true;
+    enemy.frozenUntil = Date.now() + 3000; // 3 seconds freeze
+    enemy.originalSpeed = enemy.speed;
+    enemy.speed = enemy.speed * 0.3; // Slow to 30% speed
+  } else if (projectileType === 'fire') {
+    // Apply burn effect with 30% chance
+    if (Math.random() < 0.3) {
+      enemy.isBurning = true;
+      enemy.burnUntil = Date.now() + 3000; // 3 seconds burn
+      enemy.burnDamage = damage * 0.2; // 20% of original damage per tick
+      enemy.burnTickInterval = 500; // Burn every 0.5 seconds
+      enemy.nextBurnTick = Date.now() + enemy.burnTickInterval;
     }
   }
 
-  // Check if enemy is defeated
-  if (enemy.health <= 0) {
-    // Calculate XP based on enemy value
-    const xpIncrease = enemy.pointValue;
-
-    // Update player XP
-    gameState.player.xp += xpIncrease;
-
-    // Update score - add the enemy's point value to the total score
-    gameState.score += enemy.pointValue;
-
-    // Track enemies killed
-    gameState.enemiesKilled++;
-
-    // Check for level up
-    if (gameState.player.xp >= gameState.player.xpToNextLevel) {
-      levelUpPlayer(gameState.player, onLevelUp, gameState, availableSkillChoices);
-    }
-
-    // Create explosion effect
-    onCreateExplosion(enemy.x, enemy.y, enemy.color);
-
-    // Increment wave enemy counter
-    gameState.waveEnemiesDefeated++;
-
-    // Remove enemy
-    const currentIndex = gameState.enemies.findIndex(e => e.id === enemy.id);
-    if (currentIndex !== -1) {
-      gameState.enemies.splice(currentIndex, 1);
-    }
-  }
+  return enemy.health <= 0;
 };
 
 /**

@@ -27,8 +27,12 @@ export interface Projectile {
   hitEnemyIds: number[];  // IDs of enemies already hit
   lastBounceX: number | null; // Last bounce X position (for trail rendering)
   lastBounceY: number | null; // Last bounce Y position (for trail rendering)
-  bounceChance: number; // Chance to bounce (0-1)
   isMainShot: boolean; // True for main shots (from user typing), false for auto-fire/multi-shot/bounce
+  // New projectile type system
+  projectileType: 'normal' | 'bouncing' | 'multishot' | 'ice' | 'fire';
+  // Durability system for bigger bullets
+  durability: number;
+  maxDurability: number;
 }
 
 /**
@@ -181,44 +185,68 @@ export const createDamageNumber = (
  * Create a projectile
  */
 export const createProjectile = (
-  startX: number,
-  startY: number,
+  fromX: number,
+  fromY: number,
   targetX: number,
   targetY: number,
   damage: number,
   speed: number,
   size: number,
-  isCritical: boolean,
-  aoeRadius: number,
+  isCritical: boolean = false,
+  aoeRadius: number = 0,
   targetEnemyId: number,
   isMultiShot: boolean = false,
-  isDoubleShot: boolean = false,
+  isFrozenBullet: boolean = false,
   bouncesLeft: number = 0,
-  bounceChance: number = 0.25, // Default 25% chance to bounce
-  isMainShot: boolean = false // Default false for backward compatibility
+  isMainShot: boolean = false,
+  projectileType: 'normal' | 'bouncing' | 'multishot' | 'ice' | 'fire' = 'normal',
+  player?: any // Player reference for relic effects
 ): Projectile => {
+  // Reduce size for bouncing projectiles to make them less overwhelming
+  let adjustedSize = size;
+  if (projectileType === 'bouncing') {
+    adjustedSize = size * 0.7; // 30% smaller for bouncing shots
+  }
+
+  // Calculate base durability - bigger bullets can hit more enemies
+  const baseDurability = 100;
+  let sizeDurability = baseDurability * Math.max(1, adjustedSize / 4);
+
+  // Apply kinetic mastery durability bonus - faster bullets pierce more enemies
+  if (player && player.kineticMasteryLevel) {
+    const kineticDurabilityBonus = 25 + (player.kineticMasteryLevel - 1) * 20; // 25 base + 20 per additional level
+    sizeDurability += kineticDurabilityBonus;
+  }
+
+  // Check for Hades' Chains relic effect (add 50 durability for 2 more hits)
+  if (player && player.relics.some((relic: any) => relic.id === 'hades_chains')) {
+    sizeDurability += 50; // Add durability for 2 more hits
+  }
+
   return {
-    x: startX,
-    y: startY,
+    x: fromX,
+    y: fromY,
     targetX,
     targetY,
     progress: 0,
     speed,
-    size,
+    size: adjustedSize,
     damage,
     isCritical,
     aoeRadius,
     hasHit: false,
     targetEnemyId,
     isMultiShot,
-    isDoubleShot,
-    isFrozenBullet: isDoubleShot, // Set frozen bullet flag based on isDoubleShot (for backward compatibility)
+    isDoubleShot: isFrozenBullet,
+    isFrozenBullet,
     bouncesLeft,
     hitEnemyIds: [],
     lastBounceX: null,
     lastBounceY: null,
-    bounceChance,
-    isMainShot
+    isMainShot,
+    projectileType,
+    durability: sizeDurability,
+    maxDurability: sizeDurability
   };
 };
 
@@ -305,8 +333,9 @@ export const updateProjectiles = (
   projectiles: Projectile[],
   deltaTime: number,
   enemies: any[], // Using any to avoid circular dependencies
-  onHitEnemy: (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean, isMainShot: boolean) => void,
-  onCreateExplosion: (x: number, y: number, color: string, radius: number, damage: number) => void
+  onHitEnemy: (enemyId: number, damage: number, isCritical: boolean, isMultiShot: boolean, isDoubleShot: boolean, isMainShot: boolean, projectileType?: 'normal' | 'bouncing' | 'multishot' | 'ice' | 'fire') => void,
+  onCreateExplosion: (x: number, y: number, color: string, radius: number, damage: number) => void,
+  player?: any // Add player parameter to access bounceRange
 ): void => {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const projectile = projectiles[i];
@@ -317,23 +346,39 @@ export const updateProjectiles = (
       continue;
     }
 
-    // Update progress
-    const oldProgress = projectile.progress;
-    projectile.progress += projectile.speed * deltaTime;
+    // For bouncing projectiles, continuously update target position to track moving enemies
+    if (projectile.projectileType === 'bouncing' && !projectile.hasHit) {
+      const targetEnemy = enemies.find(e => e.id === projectile.targetEnemyId);
+      if (targetEnemy) {
+        // Update target coordinates to the enemy's current position
+        projectile.targetX = targetEnemy.x;
+        projectile.targetY = targetEnemy.y;
+      }
+    }
 
-    // Calculate previous and current position
+    // Store previous position for collision detection
     const prevX = projectile.x;
     const prevY = projectile.y;
 
-    // Update position
-    projectile.x = projectile.x + (projectile.targetX - projectile.x) * (projectile.progress - oldProgress) / (1 - oldProgress);
-    projectile.y = projectile.y + (projectile.targetY - projectile.y) * (projectile.progress - oldProgress) / (1 - oldProgress);
+    // Calculate movement for this frame
+    const speedMultiplier = projectile.speed * deltaTime;
+    const oldProgress = projectile.progress;
 
-    // Check for collision with enemies
+    // Update progress more carefully to prevent overshooting
+    projectile.progress = Math.min(1, projectile.progress + speedMultiplier);
+
+    // Calculate new position using proper linear interpolation
+    const totalDx = projectile.targetX - (prevX - (projectile.targetX - prevX) * oldProgress / (1 - oldProgress || 0.001));
+    const totalDy = projectile.targetY - (prevY - (projectile.targetY - prevY) * oldProgress / (1 - oldProgress || 0.001));
+
+    const newX = prevX + totalDx * speedMultiplier;
+    const newY = prevY + totalDy * speedMultiplier;
+
+    // Check for collision along the movement path BEFORE updating position
     if (!projectile.hasHit && enemies.length > 0) {
-      // Find the enemy closest to the player along the projectile's path
       let closestEnemy = null;
       let closestDistance = Infinity;
+      let hitTime = 1; // When during the movement the hit occurs (0-1)
 
       for (const enemy of enemies) {
         // Skip enemies we've already hit with this projectile
@@ -341,30 +386,63 @@ export const updateProjectiles = (
           continue;
         }
 
-        // Calculate distance between projectile and enemy
-        const dx = projectile.x - enemy.x;
-        const dy = projectile.y - enemy.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+        // Calculate collision along the movement path
+        const moveDx = newX - prevX;
+        const moveDy = newY - prevY;
+        const moveLength = Math.sqrt(moveDx * moveDx + moveDy * moveDy);
 
-        // Check if projectile hit enemy hitbox
-        if (distance <= enemy.radius + projectile.size) {
-          // Calculate distance from player to enemy (to find the closest one)
-          const playerToEnemyDx = enemy.x - (projectile.x - (projectile.targetX - projectile.x) * projectile.progress);
-          const playerToEnemyDy = enemy.y - (projectile.y - (projectile.targetY - projectile.y) * projectile.progress);
-          const playerToEnemyDistance = Math.sqrt(playerToEnemyDx * playerToEnemyDx + playerToEnemyDy * playerToEnemyDy);
+        if (moveLength < 0.1) {
+          // Very small movement, just check current position
+          const currentDx = prevX - enemy.x;
+          const currentDy = prevY - enemy.y;
+          const currentDistance = Math.sqrt(currentDx * currentDx + currentDy * currentDy);
 
-          // Keep track of the closest enemy
-          if (playerToEnemyDistance < closestDistance) {
-            closestDistance = playerToEnemyDistance;
-            closestEnemy = enemy;
+          if (currentDistance <= enemy.radius + projectile.size) {
+            if (currentDistance < closestDistance) {
+              closestDistance = currentDistance;
+              closestEnemy = enemy;
+              hitTime = 0;
+            }
+          }
+        } else {
+          // Check for collision along the movement line
+          // Vector from previous position to enemy
+          const toEnemyX = enemy.x - prevX;
+          const toEnemyY = enemy.y - prevY;
+
+          // Project enemy position onto movement vector
+          const projectionLength = (toEnemyX * moveDx + toEnemyY * moveDy) / moveLength;
+          const t = Math.max(0, Math.min(1, projectionLength / moveLength));
+
+          // Find closest point on movement path to enemy
+          const closestX = prevX + moveDx * t;
+          const closestY = prevY + moveDy * t;
+
+          // Distance from enemy to closest point on path
+          const distanceToPath = Math.sqrt(
+            Math.pow(enemy.x - closestX, 2) + Math.pow(enemy.y - closestY, 2)
+          );
+
+          // Check if collision occurs
+          if (distanceToPath <= enemy.radius + projectile.size) {
+            // Calculate actual hit time along the path
+            const hitDistance = Math.sqrt(Math.pow(closestX - prevX, 2) + Math.pow(closestY - prevY, 2));
+            const actualHitTime = moveLength > 0 ? hitDistance / moveLength : 0;
+
+            if (distanceToPath < closestDistance) {
+              closestDistance = distanceToPath;
+              closestEnemy = enemy;
+              hitTime = actualHitTime;
+            }
           }
         }
       }
 
-      // If we found an enemy to hit, apply damage to it
+      // If we found a collision, handle it
       if (closestEnemy) {
-        // Mark as hit
-        projectile.hasHit = true;
+        // Update position to the collision point
+        projectile.x = prevX + (newX - prevX) * hitTime;
+        projectile.y = prevY + (newY - prevY) * hitTime;
 
         // Add this enemy to the list of hit enemies
         projectile.hitEnemyIds.push(closestEnemy.id);
@@ -376,8 +454,12 @@ export const updateProjectiles = (
           projectile.isCritical,
           projectile.isMultiShot,
           projectile.isDoubleShot,
-          projectile.isMainShot
+          projectile.isMainShot,
+          projectile.projectileType
         );
+
+        // Reduce durability based on hit
+        projectile.durability -= 25; // Each hit reduces durability
 
         // Create AOE explosion if needed
         if (projectile.aoeRadius > 0) {
@@ -400,87 +482,49 @@ export const updateProjectiles = (
             (enemyId, damage, isCritical) => {
               // Skip the primary target (already damaged)
               if (enemyId !== closestEnemy.id) {
-                onHitEnemy(enemyId, damage, isCritical, false, false, false);
+                onHitEnemy(enemyId, damage, isCritical, false, false, false, undefined);
               }
             }
           );
         }
 
-        // Check if we have bounces left
-        if (projectile.bouncesLeft > 0) {
-          // Check if the bounce occurs based on bounce chance
-          if (Math.random() < projectile.bounceChance) {
-            // Find a new target for the bounce
-            const potentialTargets = enemies.filter(e => !projectile.hitEnemyIds.includes(e.id));
-
-            if (potentialTargets.length > 0) {
-              // Find the closest enemy that hasn't been hit
-              const nextTarget = potentialTargets.sort((a, b) => {
-                const distA = Math.sqrt(Math.pow(a.x - closestEnemy.x, 2) + Math.pow(a.y - closestEnemy.y, 2));
-                const distB = Math.sqrt(Math.pow(b.x - closestEnemy.x, 2) + Math.pow(b.y - closestEnemy.y, 2));
-                return distA - distB;
-              })[0];
-
-              // Save the bounce position for trail rendering
-              projectile.lastBounceX = closestEnemy.x;
-              projectile.lastBounceY = closestEnemy.y;
-
-              // Reset projectile for bounce
-              projectile.hasHit = false;
-              projectile.progress = 0;
-              projectile.x = closestEnemy.x;
-              projectile.y = closestEnemy.y;
-              projectile.targetX = nextTarget.x;
-              projectile.targetY = nextTarget.y;
-              projectile.targetEnemyId = nextTarget.id;
-              projectile.damage = projectile.damage * 0.8; // Reduce damage for bounces
-              projectile.bouncesLeft--;
-
-              // Bounced bullets are no longer main shots to prevent changing enemy words during typing
-              projectile.isMainShot = false;
-
-              // Create a visual effect for the bounce
-              onCreateExplosion(
-                closestEnemy.x,
-                closestEnemy.y,
-                '#ffffff',
-                15,
-                0
-              );
-            }
-          } else {
-            // Bounce didn't occur, decrement bounces left
-            projectile.bouncesLeft = 0;
-          }
+        // Check durability - if still has durability, continue to next enemy
+        if (projectile.durability > 0) {
+          // Don't mark as hit yet, continue to hit more enemies
+          projectile.hasHit = false;
+        } else {
+          // Mark as hit when durability is depleted
+          projectile.hasHit = true;
         }
-      }
-    }
 
-    // Remove projectile if it reached its target or went beyond
-    if (projectile.progress >= 1) {
-      if (projectile.bouncesLeft > 0) {
-        // Check if the bounce occurs based on bounce chance
-        if (Math.random() < projectile.bounceChance) {
-          // Try to find a new target for the bounce
-          const potentialTargets = enemies.filter(e => !projectile.hitEnemyIds.includes(e.id));
+        // Handle bouncing for bouncing projectiles
+        if (projectile.projectileType === 'bouncing' && projectile.bouncesLeft > 0) {
+          // Find enemies within bouncing range for enemy-to-enemy bouncing
+          const bounceRange = player?.bounceRange || 120;
+          const nearbyEnemies = enemies.filter((e) =>
+            e.id !== closestEnemy.id && // Don't bounce to the same enemy
+            Math.sqrt((e.x - closestEnemy.x) ** 2 + (e.y - closestEnemy.y) ** 2) <= bounceRange
+          );
 
-          if (potentialTargets.length > 0) {
-            // Find a random enemy that hasn't been hit
-            const nextTarget = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
+          if (nearbyEnemies.length > 0) {
+            // Find the closest enemy within bounce range
+            const nextTarget = nearbyEnemies.sort((a, b) => {
+              const distA = Math.sqrt(Math.pow(a.x - closestEnemy.x, 2) + Math.pow(a.y - closestEnemy.y, 2));
+              const distB = Math.sqrt(Math.pow(b.x - closestEnemy.x, 2) + Math.pow(b.y - closestEnemy.y, 2));
+              return distA - distB;
+            })[0];
 
             // Save the bounce position for trail rendering
-            projectile.lastBounceX = projectile.targetX;
-            projectile.lastBounceY = projectile.targetY;
+            projectile.lastBounceX = projectile.x;
+            projectile.lastBounceY = projectile.y;
 
-            // Reset projectile for bounce
+            // Reset projectile for bounce with current position as start
             projectile.hasHit = false;
             projectile.progress = 0;
-            projectile.x = projectile.targetX;
-            projectile.y = projectile.targetY;
             projectile.targetX = nextTarget.x;
             projectile.targetY = nextTarget.y;
             projectile.targetEnemyId = nextTarget.id;
-            projectile.damage = projectile.damage * 0.8; // Reduce damage for bounces
+            projectile.damage = Math.floor(projectile.damage * 0.8); // Reduce damage for bounces
             projectile.bouncesLeft--;
 
             // Bounced bullets are no longer main shots to prevent changing enemy words during typing
@@ -490,15 +534,70 @@ export const updateProjectiles = (
             onCreateExplosion(
               projectile.x,
               projectile.y,
-              '#ffffff',
+              '#4A90E2',
               15,
               0
             );
           } else {
-            projectiles.splice(i, 1);
+            // No targets in range, mark as hit
+            projectile.hasHit = true;
+            projectile.bouncesLeft = 0;
           }
+        }
+      } else {
+        // No collision, update to new position
+        projectile.x = newX;
+        projectile.y = newY;
+      }
+    } else {
+      // No collision check needed, just update position
+      projectile.x = newX;
+      projectile.y = newY;
+    }
+
+    // Remove projectile if it reached its target or went beyond
+    if (projectile.progress >= 1) {
+      if (projectile.bouncesLeft > 0 && !projectile.hasHit) {
+        // Try to find a new target for the bounce at the current position
+        const bounceRange = player?.bounceRange || 120;
+        const potentialTargets = enemies.filter(e =>
+          !projectile.hitEnemyIds.includes(e.id) &&
+          Math.sqrt((e.x - projectile.x) ** 2 + (e.y - projectile.y) ** 2) <= bounceRange
+        );
+
+        if (potentialTargets.length > 0) {
+          // Find the closest enemy within bounce range
+          const nextTarget = potentialTargets.sort((a, b) => {
+            const distA = Math.sqrt(Math.pow(a.x - projectile.x, 2) + Math.pow(a.y - projectile.y, 2));
+            const distB = Math.sqrt(Math.pow(b.x - projectile.x, 2) + Math.pow(b.y - projectile.y, 2));
+            return distA - distB;
+          })[0];
+
+          // Save the bounce position for trail rendering
+          projectile.lastBounceX = projectile.x;
+          projectile.lastBounceY = projectile.y;
+
+          // Reset projectile for bounce
+          projectile.hasHit = false;
+          projectile.progress = 0;
+          projectile.targetX = nextTarget.x;
+          projectile.targetY = nextTarget.y;
+          projectile.targetEnemyId = nextTarget.id;
+          projectile.damage = Math.floor(projectile.damage * 0.8); // Reduce damage for bounces
+          projectile.bouncesLeft--;
+
+          // Bounced bullets are no longer main shots
+          projectile.isMainShot = false;
+
+          // Create a visual effect for the bounce
+          onCreateExplosion(
+            projectile.x,
+            projectile.y,
+            '#4A90E2',
+            15,
+            0
+          );
         } else {
-          // Bounce didn't occur, remove projectile
           projectiles.splice(i, 1);
         }
       } else {

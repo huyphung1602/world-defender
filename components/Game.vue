@@ -50,6 +50,11 @@
         :relic="announcedRelic"
         @close="closeRelicAnnouncement"
       />
+
+      <!-- Skill Tracker -->
+      <SkillTracker
+        :player="gameState.player"
+      />
     </div>
 
     <!-- Start Screen -->
@@ -87,6 +92,7 @@ import LevelUpScreen from './GameUI/LevelUpScreen.vue';
 import GameHUD from './GameUI/GameHUD.vue';
 import RelicAnnouncement from './GameUI/RelicAnnouncement.vue';
 import GameOverScreen from './GameUI/GameOverScreen.vue';
+import SkillTracker from './SkillTracker.vue';
 
 // Canvas dimensions
 const canvasWidth = ref(1600);
@@ -184,7 +190,7 @@ const gameLoop = (currentTime: number = performance.now()) => {
   if (!isEffectivelyPaused()) {
     currentTimestamp.value = Date.now();
   }
-  
+
   // Limit frame rate for better performance
   if (currentTime - lastFrameTime < targetFrameTime) {
     if (gameState.value.isPlaying && !gameState.value.isGameOver) {

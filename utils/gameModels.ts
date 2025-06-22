@@ -19,10 +19,18 @@ export interface Enemy {
   pointValue: number;
   wave: number;
   shape: string;
+  // Enemy type system for special mechanics
+  enemyType: 'normal' | 'blue' | 'purple';
   // Frozen effect properties
   isFrozen: boolean;
   frozenUntil: number | null;
   originalSpeed: number;
+  // Burn effect properties
+  isBurning: boolean;
+  burnUntil: number | null;
+  burnDamage: number;
+  burnTickInterval: number;
+  nextBurnTick: number | null;
   // Typing highlight properties
   isHighlighted: boolean;
   typedProgress: number; // Number of characters typed correctly
@@ -46,7 +54,6 @@ export interface Player {
   attackSpeed: number;
   projectileSize: number;
   aoeRadius: number;
-  explosiveChance: number;
   shield: number;
   maxShield: number;
   shieldRegenRate: number;
@@ -55,22 +62,31 @@ export interface Player {
   xpToNextLevel: number;
   autoFireInterval: number | null;
   multiShotTargets: number;
-  multiShotChance: number;
   bounceCount: number;  // Number of times bullets can bounce
-  frozenBulletCooldown: number | null;  // Cooldown for frozen bullets (ms)
-  nextFrozenBulletTime: number | null;  // Next time frozen bullets will fire
+  bounceRange: number;  // Range for bouncing shots
+  purpleKillCount: number;
+  // Kill-based skill tracking (replacing cooldown system)
+  frostMasteryLevel: number;  // Level of frost mastery skill
+  frostMasteryKills: number;  // Kills accumulated for frost skill
+  frostMasteryKillsRequired: number;  // Kills needed to trigger frost skill
+  fireMasteryLevel: number;  // Level of fire mastery skill
+  fireMasteryKills: number;  // Kills accumulated for fire skill
+  fireMasteryKillsRequired: number;  // Kills needed to trigger fire skill
   frozenBulletCount: number;  // Number of frozen bullets to fire
   autoFireCooldown: number | null;  // Cooldown for auto-fire (ms)
   nextAutoFireTime: number | null;  // Next time auto-fire will trigger
   autoFireTargetId: number | null;  // ID of the auto-fire target
   // Relic system properties
   relics: Relic[];  // Collected relics
+  collectedRelicIds: string[];  // Track collected relic IDs to prevent duplicates
   damageMultiplier: number;  // Multiplier for all damage
   shieldEfficiency: number;  // Multiplier for shield effectiveness
   experienceMultiplier: number; // Multiplier for XP gained
   // Special relic effects
   hasTimeDistortion?: boolean; // Time Distortion relic effect
   hasNovaCore?: boolean; // Nova Core relic effect
+  // Kinetic mastery tracking
+  kineticMasteryLevel: number; // Track kinetic mastery level for damage calculation
 }
 
 export interface GameState {
@@ -127,7 +143,8 @@ export const createEnemy = (
   wave: number,
   isElite: boolean = false,
   isBoss: boolean = false,
-  spawnSide: 'top' | 'right' | 'bottom' | 'left' = 'top'
+  spawnSide: 'top' | 'right' | 'bottom' | 'left' = 'top',
+  player?: Player // Add optional player parameter for skill-based spawn rates
 ): Enemy => {
   // Always target the exact center of the canvas
   const centerX = canvasWidth / 2;
@@ -182,9 +199,48 @@ export const createEnemy = (
     shape = 'octagon';
   }
 
-  // Determine color based on health/toughness if not specified
-  if (color === getRandomColor()) {
-    // Only modify random colors, not special colors for bosses/elites
+  // Determine enemy type for special mechanics (only for normal enemies, not elites/bosses)
+  let enemyType: 'normal' | 'blue' | 'purple' = 'normal';
+  if (!isElite && !isBoss) {
+    const typeRandom = Math.random();
+
+    // Base spawn rates
+    let baseBlueChance = 0.2; // Base 20% blue chance
+    let basePurpleChance = 0.15; // Base 15% purple chance
+
+    // Skill-based spawn rate improvements
+    if (player) {
+      // Each level of bouncing skill increases blue enemy spawn rate by 8%
+      const bounceBonus = player.bounceCount * 0.08;
+      baseBlueChance += bounceBonus;
+
+      // Each level of multi-shot skill increases purple enemy spawn rate by 6%
+      const multishotLevels = Math.max(0, player.multiShotTargets - 2); // Base is 2, so subtract 2
+      const multishotBonus = multishotLevels * 0.06;
+      basePurpleChance += multishotBonus;
+    }
+
+    // Add wave progression bonus (max +15% total for special enemies by wave 20)
+    const waveBonus = Math.min(wave - 1, 20) * 0.0075; // 0.75% per wave, cap at wave 20
+
+    const blueChance = baseBlueChance + waveBonus;
+    const purpleChance = basePurpleChance + waveBonus;
+
+    if (typeRandom < purpleChance) {
+      enemyType = 'purple';
+    } else if (typeRandom < purpleChance + blueChance) {
+      enemyType = 'blue';
+    }
+    // Rest remain normal
+  }
+
+  // Determine color based on enemy type and health/toughness
+  if (enemyType === 'blue') {
+    color = '#4A90E2'; // Blue for bouncing enemies
+  } else if (enemyType === 'purple') {
+    color = '#8B5CF6'; // Purple for multi-shot enemies
+  } else if (color === getRandomColor()) {
+    // Only modify random colors for normal enemies, not special colors for bosses/elites
     if (health <= 10) {
       color = '#4CAF50'; // Green for easy enemies
     } else if (health <= 30) {
@@ -218,9 +274,15 @@ export const createEnemy = (
     pointValue,
     wave,
     shape, // Add shape property to enemy
+    enemyType,
     isFrozen: false,
     frozenUntil: null,
     originalSpeed: speed,
+    isBurning: false,
+    burnUntil: null,
+    burnDamage: 0,
+    burnTickInterval: 0,
+    nextBurnTick: null,
     isHighlighted: false,
     typedProgress: 0,
     wrongTypingFlash: 0,
@@ -241,11 +303,10 @@ export const createPlayer = (x: number, y: number): Player => {
     damage: 10,
     critChance: 0.1,
     critMultiplier: 1.5,
-    projectileSpeed: 3,
+    projectileSpeed: 1,
     attackSpeed: 1,
     projectileSize: 4,
     aoeRadius: 0,
-    explosiveChance: 0,
     shield: 160,
     maxShield: 160,
     shieldRegenRate: 3,
@@ -253,19 +314,26 @@ export const createPlayer = (x: number, y: number): Player => {
     level: 1,
     xpToNextLevel: 100,
     autoFireInterval: null,
-    multiShotTargets: 1,
-    multiShotChance: 0,
-    bounceCount: 0,
-    frozenBulletCooldown: null,
-    nextFrozenBulletTime: null,
+    multiShotTargets: 2,
+    bounceCount: 1,
+    bounceRange: 120,
+    purpleKillCount: 0,
+    frostMasteryLevel: 0,
+    frostMasteryKills: 0,
+    frostMasteryKillsRequired: 0,
+    fireMasteryLevel: 0,
+    fireMasteryKills: 0,
+    fireMasteryKillsRequired: 0,
     frozenBulletCount: 0,
     autoFireCooldown: null,
     nextAutoFireTime: null,
     autoFireTargetId: null,
     relics: [],
+    collectedRelicIds: [],
     damageMultiplier: 1,
     shieldEfficiency: 1,
     experienceMultiplier: 1,
+    kineticMasteryLevel: 0,
   };
 };
 
@@ -327,22 +395,12 @@ export const generateSkills = (): Skill[] => {
     {
       id: 'rapid_fire',
       name: 'Rapid Fire',
-      description: 'Level 1-2: 20% chance for double shots. Level 3+: +15% multi-shot chance',
+      description: 'Increases multi-shot targets. Each level: +1 target (max 5 targets)',
       icon: '🔱',
       level: 0,
       maxLevel: 5,
       applyEffect: (player: Player) => {
-        if (player.level <= 2) {
-          if (player.multiShotChance === 0) {
-            player.multiShotChance = 0.2; // Start with 20%
-          } else {
-            player.multiShotChance += 0.15; // +15% each level
-          }
-          player.multiShotTargets = 1; // Double shots
-        } else {
-          player.multiShotChance += 0.15;
-          player.multiShotTargets = Math.min(player.multiShotTargets + 1, 3); // Up to quad shots
-        }
+        player.multiShotTargets = Math.min(player.multiShotTargets + 1, 5);
       }
     },
     {
@@ -377,83 +435,97 @@ export const generateSkills = (): Skill[] => {
       }
     },
     {
-      id: 'explosive',
-      name: 'Demolition Expert',
-      description: 'Level 1: 15% explosion chance. Each level: +10% chance, +20% radius',
-      icon: '💣',
+      id: 'velocity',
+      name: 'Kinetic Mastery',
+      description: 'Faster bullets hit harder! Level 1: +50% speed, +15% damage. Each level: +25% speed, +10% damage',
+      icon: '⚡',
       level: 0,
-      maxLevel: 4,
+      maxLevel: 6,
       applyEffect: (player: Player) => {
-        if (player.level === 1) {
-          player.explosiveChance = 0.15;
-          player.aoeRadius = 25;
+        player.kineticMasteryLevel += 1; // Track the skill level
+
+        if (player.kineticMasteryLevel === 1) {
+          // First level - significant initial boost
+          player.projectileSpeed += 0.5; // 50% speed increase (base is 1.0)
+          player.damageMultiplier += 0.15; // 15% damage increase
         } else {
-          player.explosiveChance += 0.1;
-          player.aoeRadius = Math.floor(player.aoeRadius * 1.2);
+          // Subsequent levels - smaller speed increases but more damage
+          player.projectileSpeed += 0.25; // 25% speed increase per level
+          player.damageMultiplier += 0.1; // 10% damage increase per level
         }
       }
     },
     {
       id: 'frost_mastery',
-      name: 'Frost Mastery',
-      description: 'Auto-frost burst every 15s. Each level: -2s cooldown, +2 bullets',
-      icon: '❄️',
+      name: 'Arctic Barrage',
+      description: 'Ice arrows after 20 kills. Level 1: 8 arrows. Each level: -5 kills needed, +2 arrows',
+      icon: '🏹',
       level: 0,
       maxLevel: 6,
       applyEffect: (player: Player) => {
-        if (player.frozenBulletCooldown === null) {
-          player.frozenBulletCooldown = 15000; // 15 seconds initial
-          player.nextFrozenBulletTime = Date.now() + player.frozenBulletCooldown;
-          player.frozenBulletCount = 14; // Start with more bullets
+        if (player.frostMasteryLevel === 0) {
+          // First level - initialize frost system
+          player.frostMasteryLevel = 1;
+          player.frostMasteryKillsRequired = 20;
+          player.frozenBulletCount = 8;
+          player.frostMasteryKills = 0;
         } else {
-          player.frozenBulletCooldown = Math.max(7000, player.frozenBulletCooldown - 2000);
+          // Subsequent levels - reduce kills required and increase bullet count
+          player.frostMasteryLevel++;
+          player.frostMasteryKillsRequired = Math.max(5, player.frostMasteryKillsRequired - 5);
           player.frozenBulletCount += 2;
         }
       }
     },
     {
-      id: 'targeting_system',
-      name: 'Targeting System',
-      description: 'Smart auto-fire every 8s. Each level: -1.2s cooldown, higher priority targets',
-      icon: '🤖',
+      id: 'fire_mastery',
+      name: 'Meteor Storm',
+      description: 'Fire meteors after 50 kills. Level 1: 30% burn chance. Each level: -5 kills needed, +burn damage',
+      icon: '☄️',
       level: 0,
       maxLevel: 6,
       applyEffect: (player: Player) => {
-        if (player.autoFireCooldown === null) {
-          player.autoFireCooldown = 8000; // 8 seconds initial
-          player.nextAutoFireTime = Date.now() + player.autoFireCooldown;
-          player.autoFireTargetId = null;
+        if (player.fireMasteryLevel === 0) {
+          // First level - initialize fire system
+          player.fireMasteryLevel = 1;
+          player.fireMasteryKillsRequired = 50;
+          player.fireMasteryKills = 0;
         } else {
-          player.autoFireCooldown = Math.max(2500, player.autoFireCooldown - 1200);
+          // Subsequent levels - reduce kills required
+          player.fireMasteryLevel++;
+          player.fireMasteryKillsRequired = Math.max(35, player.fireMasteryKillsRequired - 5);
         }
       }
     },
     {
       id: 'ricochet',
       name: 'Ricochet Mastery',
-      description: 'Level 1: 35% bounce chance. Each level: +1 max bounce, +10% chance',
+      description: 'Each level: +1 max bounce, +20 range (starts with 1 bounce, 120 range)',
       icon: '↩️',
       level: 0,
       maxLevel: 4,
       applyEffect: (player: Player) => {
-        if (player.level === 1) {
-          player.bounceCount = 1;
-          // Bounce chance is handled per projectile, but we track it here
-        } else {
-          player.bounceCount += 1;
-        }
+        // Always increase both bounce count and range since player starts with 1 bounce
+        player.bounceCount += 1;
+        player.bounceRange += 20;
       }
     },
     {
       id: 'heavy_rounds',
       name: 'Heavy Rounds',
-      description: 'Increases projectile size by 50% and damage by 10%',
+      description: 'Increases projectile size by 40% and damage by 15%',
       icon: '⚫',
       level: 0,
       maxLevel: 5,
       applyEffect: (player: Player) => {
-        player.projectileSize *= 1.5;
-        player.damageMultiplier += 0.1; // Bigger bullets deal more damage
+        // Better stacking: use percentage of current size with diminishing returns
+        const currentSize = player.projectileSize;
+        const baseIncrease = 0.4; // 40% increase
+        const sizeRatio = currentSize / 4; // 4 is base size
+        const diminishingFactor = 1 / (1 + sizeRatio * 0.3); // Diminishing returns
+        const actualIncrease = baseIncrease * diminishingFactor;
+        player.projectileSize = Math.min(player.projectileSize * (1 + actualIncrease), 20); // Hard cap at 20
+        player.damageMultiplier += 0.15;
       }
     },
     {
@@ -577,240 +649,248 @@ export interface RelicStar {
  */
 export const generateRelics = (): Relic[] => {
   return [
-    // Common Relics (45% chance)
+    // Common Relics (45% chance) - Focus on single stat improvements
     {
-      id: 'iron_core',
-      name: 'Iron Core',
-      description: 'Increases base damage by 25%',
-      icon: '⚙️',
+      id: 'hermes_sandals',
+      name: 'Hermes\' Sandals',
+      description: 'Increases projectile speed by 50%',
+      icon: '👟',
       rarity: 'common',
-      auraColor: '#8c7853',
+      auraColor: '#ffb366',
       applyEffect: (player: Player) => {
-        player.damage = Math.floor(player.damage * 1.25);
+        player.projectileSpeed += 1;
       }
     },
     {
-      id: 'crystal_focus',
-      name: 'Crystal Focus',
-      description: 'Increases critical chance by 15%',
-      icon: '💎',
+      id: 'apollo_bow',
+      name: 'Apollo\'s Bow',
+      description: 'Increases critical chance by 20%',
+      icon: '🏹',
       rarity: 'common',
-      auraColor: '#66ccff',
+      auraColor: '#ffd700',
       applyEffect: (player: Player) => {
-        player.critChance += 0.15;
+        player.critChance += 0.2;
       }
     },
     {
-      id: 'energy_cell',
-      name: 'Energy Cell',
-      description: 'Increases max shield by 50 and regen by 1',
-      icon: '🔋',
+      id: 'aegis_fragment',
+      name: 'Aegis Fragment',
+      description: 'Increases shield capacity by 75 and regeneration by 2/s',
+      icon: '🛡️',
       rarity: 'common',
-      auraColor: '#00ff88',
+      auraColor: '#4a90e2',
       applyEffect: (player: Player) => {
-        player.maxShield += 50;
-        player.shield = Math.min(player.shield + 50, player.maxShield);
-        player.shieldRegenRate += 1;
+        const currentShield = player.shield;
+        const shieldIncrease = 75;
+        player.maxShield += shieldIncrease;
+        player.shield = Math.min(currentShield + shieldIncrease, player.maxShield);
+        player.shieldRegenRate += 2;
       }
     },
     {
-      id: 'heavy_rounds',
-      name: 'Heavy Rounds',
-      description: 'Increases projectile size by 40% and damage by 15%',
-      icon: '⚫',
+      id: 'prometheus_flame',
+      name: 'Prometheus\' Flame',
+      description: 'Increases base damage by 30%',
+      icon: '🔥',
       rarity: 'common',
-      auraColor: '#ffaa00',
+      auraColor: '#ff6b47',
       applyEffect: (player: Player) => {
-        player.projectileSize *= 1.4;
-        player.damageMultiplier += 0.15;
+        player.damage = Math.floor(player.damage * 1.3);
+      }
+    },
+    {
+      id: 'athena_wisdom',
+      name: 'Athena\'s Wisdom',
+      description: 'Increases experience gain by 40%',
+      icon: '🦉',
+      rarity: 'common',
+      auraColor: '#9b59b6',
+      applyEffect: (player: Player) => {
+        player.experienceMultiplier += 0.4;
       }
     },
 
-    // Rare Relics (30% chance)
+    // Rare Relics (30% chance) - Focus on specific playstyles
     {
-      id: 'berserker_soul',
-      name: 'Berserker Soul',
-      description: 'Increases damage multiplier by 30%',
-      icon: '👹',
+      id: 'ares_gauntlets',
+      name: 'Ares\' Gauntlets',
+      description: 'Critical hits deal 100% more damage',
+      icon: '👊',
       rarity: 'rare',
-      auraColor: '#ff4444',
+      auraColor: '#e74c3c',
       applyEffect: (player: Player) => {
-        player.damageMultiplier += 0.3;
+        player.critMultiplier += 1.0;
       }
     },
     {
-      id: 'mystic_sight',
-      name: 'Mystic Sight',
-      description: 'Critical hits deal 75% more damage',
-      icon: '👁️',
+      id: 'artemis_quiver',
+      name: 'Artemis\' Quiver',
+      description: 'Adds 2 targets to multi-shot attacks',
+      icon: '🏹',
       rarity: 'rare',
-      auraColor: '#8844ff',
+      auraColor: '#27ae60',
       applyEffect: (player: Player) => {
-        player.critMultiplier += 0.75;
+        player.multiShotTargets += 2;
       }
     },
     {
-      id: 'storm_generator',
-      name: 'Storm Generator',
-      description: 'Reduces all cooldowns by 25%',
-      icon: '⛈️',
+      id: 'hades_chains',
+      name: 'Hades\' Chains',
+      description: 'Projectiles can hit 2 additional enemies before dissipating',
+      icon: '⛓️',
       rarity: 'rare',
-      auraColor: '#44aaff',
+      auraColor: '#2c3e50',
       applyEffect: (player: Player) => {
-        if (player.frozenBulletCooldown) {
-          player.frozenBulletCooldown = Math.floor(player.frozenBulletCooldown * 0.75);
+        // This will be handled in the projectile durability system
+        // Add 50 durability which equals roughly 2 more hits
+        // We'll modify the durability calculation
+      }
+    },
+    {
+      id: 'hermes_caduceus',
+      name: 'Hermes\' Caduceus',
+      description: 'Reduces skill trigger requirements by 30%',
+      icon: '🕊️',
+      rarity: 'rare',
+      auraColor: '#3498db',
+      applyEffect: (player: Player) => {
+        // Reduce kill requirements for frost and fire skills
+        if (player.frostMasteryKillsRequired > 0) {
+          player.frostMasteryKillsRequired = Math.max(3, Math.floor(player.frostMasteryKillsRequired * 0.7));
         }
-        if (player.autoFireCooldown) {
-          player.autoFireCooldown = Math.floor(player.autoFireCooldown * 0.75);
+        if (player.fireMasteryKillsRequired > 0) {
+          player.fireMasteryKillsRequired = Math.max(35, Math.floor(player.fireMasteryKillsRequired * 0.7));
         }
       }
     },
     {
-      id: 'echo_chamber',
-      name: 'Echo Chamber',
-      description: 'Increases multi-shot chance by 25%',
-      icon: '🔊',
+      id: 'chronos_hourglass',
+      name: 'Chronos\' Hourglass',
+      description: 'Slows all enemies by 25% permanently',
+      icon: '⏳',
       rarity: 'rare',
-      auraColor: '#ff8844',
+      auraColor: '#f39c12',
       applyEffect: (player: Player) => {
-        player.multiShotChance += 0.25;
-      }
-    },
-    {
-      id: 'time_distortion',
-      name: 'Time Distortion',
-      description: 'Slows all enemies by 30% permanently',
-      icon: '🌀',
-      rarity: 'rare',
-      auraColor: '#9966ff',
-      applyEffect: (player: Player) => {
-        // This will be handled in the game engine to affect all enemies
-        // We'll add a special property to track this effect
         if (!player.hasTimeDistortion) {
           player.hasTimeDistortion = true;
         }
       }
     },
 
-    // Epic Relics (20% chance)
+    // Epic Relics (20% chance) - Focus on powerful combinations
     {
-      id: 'fusion_reactor',
-      name: 'Fusion Reactor',
-      description: 'Increases all damage by 50% and projectile size by 60%',
-      icon: '⚛️',
+      id: 'poseidon_trident',
+      name: 'Poseidon\'s Trident',
+      description: 'Bouncing shots gain +1 bounce and +100 range (requires ricochet skill)',
+      icon: '🔱',
       rarity: 'epic',
-      auraColor: '#00ffff',
+      auraColor: '#1abc9c',
+      applyEffect: (player: Player) => {
+        player.bounceCount += 1;
+        player.bounceRange += 100;
+      }
+    },
+    {
+      id: 'hephaestus_forge',
+      name: 'Hephaestus\' Forge',
+      description: 'Projectiles deal 50% more damage and size increases by 60%',
+      icon: '🔨',
+      rarity: 'epic',
+      auraColor: '#e67e22',
       applyEffect: (player: Player) => {
         player.damageMultiplier += 0.5;
-        player.projectileSize *= 1.6;
+        const currentSize = player.projectileSize;
+        const sizeRatio = currentSize / 4;
+        const diminishingFactor = 1 / (1 + sizeRatio * 0.2);
+        const actualIncrease = 0.6 * diminishingFactor;
+        player.projectileSize = Math.min(player.projectileSize * (1 + actualIncrease), 20);
       }
     },
     {
-      id: 'quantum_processor',
-      name: 'Quantum Processor',
-      description: 'Doubles experience gain and reduces skill cooldowns by 40%',
-      icon: '🧠',
+      id: 'demeter_harvest',
+      name: 'Demeter\'s Harvest',
+      description: 'Triple experience gain and double shield efficiency',
+      icon: '🌾',
       rarity: 'epic',
-      auraColor: '#ff00ff',
+      auraColor: '#2ecc71',
       applyEffect: (player: Player) => {
-        player.experienceMultiplier += 1.0;
-        if (player.frozenBulletCooldown) {
-          player.frozenBulletCooldown = Math.floor(player.frozenBulletCooldown * 0.6);
-        }
-        if (player.autoFireCooldown) {
-          player.autoFireCooldown = Math.floor(player.autoFireCooldown * 0.6);
-        }
+        player.experienceMultiplier += 2.0; // +200% = triple
+        player.shieldEfficiency += 1.0; // +100% = double
       }
     },
     {
-      id: 'titan_armor',
-      name: 'Titan Armor',
-      description: 'Triples max shield and doubles shield efficiency',
-      icon: '🛡️',
+      id: 'dionysus_chalice',
+      name: 'Dionysus\' Chalice',
+      description: 'Explosions deal 100% more damage and have 50% larger radius',
+      icon: '🍷',
       rarity: 'epic',
-      auraColor: '#ffff00',
-      applyEffect: (player: Player) => {
-        const currentShield = player.shield;
-        player.maxShield *= 3;
-        player.shield = currentShield * 3;
-        player.shieldEfficiency += 1.0;
-      }
-    },
-    {
-      id: 'nova_core',
-      name: 'Nova Core',
-      description: 'Doubles explosion radius and explosion damage',
-      icon: '🌟',
-      rarity: 'epic',
-      auraColor: '#ff6600',
+      auraColor: '#9b59b6',
       applyEffect: (player: Player) => {
         if (player.aoeRadius > 0) {
-          player.aoeRadius *= 2;
+          player.aoeRadius *= 1.5;
         } else {
-          player.aoeRadius = 50; // Give base explosion radius if none
+          player.aoeRadius = 40; // Give base explosion radius if none
         }
-        // Explosion damage will be handled in the explosion logic
         if (!player.hasNovaCore) {
           player.hasNovaCore = true;
         }
       }
     },
 
-    // Legendary Relics (5% chance)
+    // Legendary Relics (5% chance) - Game-changing effects
     {
-      id: 'omnipotent_core',
-      name: 'Omnipotent Core',
-      description: 'Increases ALL stats by 100%. The ultimate power.',
-      icon: '🌟',
+      id: 'zeus_thunderbolt',
+      name: 'Zeus\' Thunderbolt',
+      description: 'All shots become critical hits with +200% damage',
+      icon: '⚡',
       rarity: 'legendary',
-      auraColor: '#ffffff',
+      auraColor: '#f1c40f',
       applyEffect: (player: Player) => {
-        player.damageMultiplier += 1.0;
-        player.shieldEfficiency += 1.0;
-        player.experienceMultiplier += 1.0;
-        player.critChance += 0.5;
-        player.critMultiplier += 1.0;
-        const currentShield = player.shield;
-        player.maxShield *= 2;
-        player.shield = currentShield * 2;
-        player.multiShotChance += 0.5;
-        player.projectileSize *= 2.0;
-        if (player.frozenBulletCooldown) {
-          player.frozenBulletCooldown = Math.floor(player.frozenBulletCooldown * 0.5);
-        }
-        if (player.autoFireCooldown) {
-          player.autoFireCooldown = Math.floor(player.autoFireCooldown * 0.5);
-        }
+        player.critChance = 1.0; // 100% crit chance
+        player.critMultiplier += 2.0; // +200% crit damage
       }
     },
     {
-      id: 'time_dilation',
-      name: 'Time Dilation Field',
-      description: 'Triples projectile size and damage, halves all cooldowns',
-      icon: '⏰',
+      id: 'pandora_box',
+      name: 'Pandora\'s Box',
+      description: 'Chaos incarnate: Massive boost to ALL stats',
+      icon: '📦',
       rarity: 'legendary',
-      auraColor: '#9966ff',
+      auraColor: '#8e44ad',
       applyEffect: (player: Player) => {
-        // Instead of projectile speed (buggy), focus on size and damage
-        player.projectileSize *= 3.0; // Triple projectile size
-        player.damageMultiplier += 2.0; // +200% damage multiplier
-        
-        // Keep the cooldown reduction
-        if (player.frozenBulletCooldown) {
-          player.frozenBulletCooldown = Math.floor(player.frozenBulletCooldown * 0.5);
-        }
-        if (player.autoFireCooldown) {
-          player.autoFireCooldown = Math.floor(player.autoFireCooldown * 0.5);
-        }
+        // More balanced legendary effect
+        player.damageMultiplier += 0.75;
+        player.critChance += 0.3;
+        player.critMultiplier += 0.5;
+        player.multiShotTargets += 2;
+        player.bounceCount += 2;
+        player.bounceRange += 75;
+        const currentShield = player.shield;
+        player.maxShield = Math.floor(player.maxShield * 1.5);
+        player.shield = Math.floor(currentShield * 1.5);
+        player.experienceMultiplier += 0.5;
+        // Moderate size increase
+        const currentSize = player.projectileSize;
+        const sizeRatio = currentSize / 4;
+        const diminishingFactor = 1 / (1 + sizeRatio * 0.15);
+        const actualIncrease = 0.5 * diminishingFactor;
+        player.projectileSize = Math.min(player.projectileSize * (1 + actualIncrease), 20);
       }
     }
   ];
 };
 
 /**
- * Get a random relic based on rarity weights
+ * Get a random relic based on rarity weights, excluding already collected relics
  */
-export const getRandomRelic = (relics: Relic[]): Relic => {
+export const getRandomRelic = (relics: Relic[], collectedRelicIds: string[] = []): Relic | null => {
+  // Filter out already collected relics
+  const availableRelics = relics.filter(relic => !collectedRelicIds.includes(relic.id));
+
+  if (availableRelics.length === 0) {
+    return null; // No more relics available
+  }
+
   const random = Math.random();
 
   // Rarity chances: Common 45%, Rare 30%, Epic 20%, Legendary 5%
@@ -825,7 +905,14 @@ export const getRandomRelic = (relics: Relic[]): Relic => {
     targetRarity = 'legendary';
   }
 
-  const relicsOfRarity = relics.filter(relic => relic.rarity === targetRarity);
+  const relicsOfRarity = availableRelics.filter(relic => relic.rarity === targetRarity);
+
+  if (relicsOfRarity.length === 0) {
+    // If no relics of target rarity are available, pick from any available relic
+    const fallbackRelic = availableRelics[Math.floor(Math.random() * availableRelics.length)];
+    return fallbackRelic;
+  }
+
   return relicsOfRarity[Math.floor(Math.random() * relicsOfRarity.length)];
 };
 
@@ -911,14 +998,14 @@ export const createRelicStar = (
 };
 
 /**
- * Generate words for relic stars based on rarity
+ * Generate words for relic stars based on rarity using Greek god names
  */
 const generateRelicWord = (rarity: string): string => {
   const words = {
-    common: ['star', 'light', 'glow', 'shine', 'spark'],
-    rare: ['comet', 'nebula', 'pulsar', 'quasar', 'cosmic'],
-    epic: ['phoenix', 'dragon', 'storm', 'void', 'chaos'],
-    legendary: ['infinity', 'eternity', 'omnipotent', 'transcend', 'divine']
+    common: ['hermes', 'apollo', 'athena', 'hestia', 'demeter'],
+    rare: ['artemis', 'ares', 'hades', 'chronos', 'hecate'],
+    epic: ['poseidon', 'hephaestus', 'dionysus', 'persephone', 'aphrodite'],
+    legendary: ['zeus', 'hera', 'titans', 'olympus', 'pandora']
   };
 
   const rarityWords = words[rarity as keyof typeof words] || words.common;
